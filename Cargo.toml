@@ -1,0 +1,20 @@
+[package]
+name = "py-binding-polodb"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+# The name of the native library. This is the name which will be used in Python to import the
+# library (i.e. `import string_sum`). If you change this, you must also change the name of the
+# `#[pymodule]` in `src/lib.rs`.
+name = "rust_polodb"
+
+# "cdylib" is necessary to produce a shared library for Python to import from.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# polodb-librocksdb-sys = { path = "../src/librocksdb-sys", version = "9.0.0-alpha.1", features = ["default", "mt_static"] }
+
+polodb_core = "5.1.3"
+# polodb_core = { path = "../src/polodb_core", default-features = false  }
+pyo3 = { version = "0.22.5", features = ["extension-module", "auto-initialize"] }
