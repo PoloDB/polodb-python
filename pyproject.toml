@@ -1,11 +1,10 @@
 [project]
-name = "polodb"
-version = "0.1.0"
+name = "polodb-python"
+version = "0.1.10"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
 
-packages = [{ include = "polodb" }]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
@@ -15,19 +14,19 @@ classifiers = [
 dependencies = []
 
 [build-system]
-requires = ["poetry-core", "maturin>=1,<2"]
+requires = ["maturin>=1,<2"]
 build-backend = "maturin"
 
-[tool.poetry.scripts]
-build-rust = "maturin develop"
 
 [dependency-groups]
 dev = [
+    "cibuildwheel>=2.21.3",
     "ipdb>=0.13.13",
     "ipython>=8.18.1",
     "maturin>=1.7.4",
     "pip>=24.3.1",
     "pytest>=8.3.3",
+    "wheel>=0.44.0",
 ]
 
 [tool.uv]
@@ -40,3 +39,6 @@ polodb = { workspace = true }
 pythonpath = [
   "."
 ]
+
+[tool.maturin]
+include = ["polodb/**/*"]
