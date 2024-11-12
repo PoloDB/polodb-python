@@ -2,8 +2,8 @@ name: Build and Publish python version
 
 on:
   push:
-    branches:
-      - main
+    # branches:
+    #   - main
     tags:
       - "v*.*.*"  # Optional: only run on version tags
   # pull_request:
@@ -48,7 +48,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-14, windows-latest]
         # os: [macos-14]
-        python-version: ["3.9", "3.10"]
+        python-version: ["3.9"] # , "3.10"
         # python-version: ["3.10"]
         architecture: [x86_64, aarch64]  # Explicitly define architectures
         # architecture: [aarch64]  # Explicitly define architectures
@@ -124,17 +124,5 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           ls -R artifacts/
-          twine upload artifacts/**/*.tar.gz artifacts/**/*.whl
-  release:
-    name: Release pushed tag
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Create release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-        run: |
-          gh release create "$tag" \
-              --repo="$GITHUB_REPOSITORY" \
-              --title="${GITHUB_REPOSITORY#*/} ${tag#v}" \
-              --generate-notes
+          twine upload artifacts/**/*.tar.gz 
+          twine upload artifacts/**/*.whl

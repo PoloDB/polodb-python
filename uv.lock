@@ -259,8 +259,11 @@ wheels = [
 
 [[package]]
 name = "polodb-python"
-version = "0.1.11"
+version = "0.1.12"
 source = { editable = "." }
+dependencies = [
+    { name = "tomli" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -274,6 +277,7 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "tomli", specifier = ">=2.0.2" }]
 
 [package.metadata.requires-dev]
 dev = [
