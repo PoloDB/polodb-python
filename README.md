@@ -28,14 +28,14 @@ python3.9 -m pip install polodb-python
 
 ### Current methods supported for collection
 
- * delete_one
- * delete_many
- * find
- * find_one
- * insert_many
- * insert_one
- * len
- * name
- * update_many
- * update_one
- * aggregate
+- [x] delete_one
+- [x] delete_many
+- [x] find
+- [x] find_one
+- [x] insert_many
+- [x] insert_one
+- [x] len
+- [x] name
+- [x] update_many (with upsert option)
+- [x] update_one (with upsert option)
+- [x] aggregate

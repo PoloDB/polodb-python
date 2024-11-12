@@ -3,6 +3,7 @@ use crate::helper_type_translator::{
     delete_result_to_pydict, document_to_pydict, update_result_to_pydict,
 };
 use polodb_core::bson::Document;
+use polodb_core::options::UpdateOptions;
 use polodb_core::{Collection, CollectionT, Database};
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyRuntimeError; // Import PyRuntimeError for error handling
@@ -23,52 +24,6 @@ impl PyCollection {
         self.inner.name()
     }
 
-    pub fn update_one(
-        &self,
-        py: Python,
-        filter: Py<PyDict>,
-        update: Py<PyDict>,
-    ) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
-        let update_doc = convert_py_obj_to_document(update.to_object(py).as_any())?;
-
-        // Call the Rust method `find_one`
-        match self.inner.update_one(filter_doc, update_doc) {
-            Ok(update_result) => {
-                // Convert BSON Document to Python Dict
-                let py_result = update_result_to_pydict(py, update_result).unwrap();
-                Ok(Some(py_result.to_object(py)))
-            }
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Update one error: {}",
-                err
-            ))),
-        }
-    }
-    pub fn update_many(
-        &self,
-        py: Python,
-        filter: Py<PyDict>,
-        update: Py<PyDict>,
-    ) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
-        let update_doc = convert_py_obj_to_document(update.to_object(py).as_any())?;
-
-        // Call the Rust method `find_one`
-        match self.inner.update_many(filter_doc, update_doc) {
-            Ok(update_result) => {
-                // Convert BSON Document to Python Dict
-                let py_result = update_result_to_pydict(py, update_result).unwrap();
-                Ok(Some(py_result.to_object(py)))
-            }
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Update many error: {}",
-                err
-            ))),
-        }
-    }
     pub fn insert_many(&self, doc: Py<PyList>) -> PyResult<PyObject> {
         // Acquire the Python GIL (Global Interpreter Lock)
         Python::with_gil(|py| {
@@ -92,24 +47,6 @@ impl PyCollection {
                 Err(e) => {
                     // Raise a Python exception on error
                     Err(PyRuntimeError::new_err(format!("Insert many error: {}", e)))
-                }
-            }
-        })
-    }
-
-    pub fn count_documents(&self) -> PyResult<PyObject> {
-        // Acquire the Python GIL (Global Interpreter Lock)
-        Python::with_gil(|py| {
-            match self.inner.count_documents() {
-                Ok(result) => {
-                    Ok(result.into_py(py))
-                }
-                Err(e) => {
-                    // Raise a Python exception on error
-                    Err(PyRuntimeError::new_err(format!(
-                        "Count documents error: {}",
-                        e
-                    )))
                 }
             }
         })
@@ -140,6 +77,110 @@ impl PyCollection {
                 }
             }
         })
+    }
+
+    pub fn update_one(
+        &self,
+        py: Python,
+        filter: Py<PyDict>,
+        update: Py<PyDict>,
+    ) -> PyResult<Option<PyObject>> {
+        // Convert PyDict to BSON Document
+        let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
+        let update_doc = convert_py_obj_to_document(update.to_object(py).as_any())?;
+
+        // Call the Rust method `find_one`
+        match self.inner.update_one(filter_doc, update_doc) {
+            Ok(update_result) => {
+                // Convert BSON Document to Python Dict
+                let py_result = update_result_to_pydict(py, update_result).unwrap();
+                Ok(Some(py_result.to_object(py)))
+            }
+            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Update one error: {}",
+                err
+            ))),
+        }
+    }
+
+    pub fn update_many(
+        &self,
+        py: Python,
+        filter: Py<PyDict>,
+        update: Py<PyDict>,
+    ) -> PyResult<Option<PyObject>> {
+        // Convert PyDict to BSON Document
+        let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
+        let update_doc = convert_py_obj_to_document(update.to_object(py).as_any())?;
+
+        // Call the Rust method `find_one`
+        match self.inner.update_many(filter_doc, update_doc) {
+            Ok(update_result) => {
+                // Convert BSON Document to Python Dict
+                let py_result = update_result_to_pydict(py, update_result).unwrap();
+                Ok(Some(py_result.to_object(py)))
+            }
+            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Update many error: {}",
+                err
+            ))),
+        }
+    }
+
+    pub fn upsert(
+        &self,
+        py: Python,
+        filter: Py<PyDict>,
+        update: Py<PyDict>,
+    ) -> PyResult<Option<PyObject>> {
+        // Convert PyDict to BSON Document
+        let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
+        let update_doc = convert_py_obj_to_document(update.to_object(py).as_any())?;
+
+        // Call the Rust method `find_one`
+        match self.inner.update_one_with_options(
+            filter_doc,
+            update_doc,
+            UpdateOptions::builder().upsert(true).build(),
+        ) {
+            Ok(update_result) => {
+                // Convert BSON Document to Python Dict
+                let py_result = update_result_to_pydict(py, update_result).unwrap();
+                Ok(Some(py_result.to_object(py)))
+            }
+            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Upsert one error: {}",
+                err
+            ))),
+        }
+    }
+
+    pub fn upsert_many(
+        &self,
+        py: Python,
+        filter: Py<PyDict>,
+        update: Py<PyDict>,
+    ) -> PyResult<Option<PyObject>> {
+        // Convert PyDict to BSON Document
+        let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
+        let update_doc = convert_py_obj_to_document(update.to_object(py).as_any())?;
+
+        // Call the Rust method `find_one`
+        match self.inner.update_many_with_options(
+            filter_doc,
+            update_doc,
+            UpdateOptions::builder().upsert(true).build(),
+        ) {
+            Ok(update_result) => {
+                // Convert BSON Document to Python Dict
+                let py_result = update_result_to_pydict(py, update_result).unwrap();
+                Ok(Some(py_result.to_object(py)))
+            }
+            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Upsert many error: {}",
+                err
+            ))),
+        }
     }
 
     pub fn delete_one(&self, filter: Py<PyDict>) -> PyResult<PyObject> {
@@ -193,6 +234,23 @@ impl PyCollection {
             }
         })
     }
+
+    pub fn count_documents(&self) -> PyResult<PyObject> {
+        // Acquire the Python GIL (Global Interpreter Lock)
+        Python::with_gil(|py| {
+            match self.inner.count_documents() {
+                Ok(result) => Ok(result.into_py(py)),
+                Err(e) => {
+                    // Raise a Python exception on error
+                    Err(PyRuntimeError::new_err(format!(
+                        "Count documents error: {}",
+                        e
+                    )))
+                }
+            }
+        })
+    }
+
     pub fn find_one(&self, py: Python, filter: Py<PyDict>) -> PyResult<Option<PyObject>> {
         // Convert PyDict to BSON Document
         let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;

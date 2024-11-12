@@ -10,6 +10,7 @@ use py_database::PyDatabase;
 fn rust_polodb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // m.add_function(wrap_pyfunction!(sum_as_string, m)?);
     m.add_class::<PyDatabase>()?;
+
     m.add_class::<PyCollection>()?;
 
     Ok(())

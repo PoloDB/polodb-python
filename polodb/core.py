@@ -49,11 +49,15 @@ class Collection:
     def find(self, filter: dict):
         return self.__rust_collection.find(filter)
 
-    def update_many(self, filter: dict, update_doc: dict):
-        return self.__rust_collection.update_many(filter, update_doc)
+    def update_many(self, filter: dict, update_doc: dict, upsert=False):
+        if upsert is False:
+            return self.__rust_collection.update_many(filter, update_doc)
+        return self.__rust_collection.upsert_many(filter, update_doc)
 
-    def update_one(self, filter: dict, update_doc: dict):
-        return self.__rust_collection.update_one(filter, update_doc)
+    def update_one(self, filter: dict, update_doc: dict, upsert=False):
+        if upsert is False:
+            return self.__rust_collection.update_one(filter, update_doc)
+        return self.__rust_collection.upsert(filter, update_doc)
 
     def delete_many(self, filter: dict):
         return self.__rust_collection.delete_many(filter)
