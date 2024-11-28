@@ -36,7 +36,7 @@ impl PyCollection {
             match self.inner.insert_many(bson_vec_docs) {
                 Ok(result) => {
                     // Create a Python object from the Rust result and return it
-                    let dict: Bound<'_, PyDict> = PyDict::new_bound(py);
+                    let dict: Bound<'_, PyDict> = PyDict::new(py);
 
                     for (key, value) in &result.inserted_ids {
                         dict.set_item(key, bson_to_py_obj(py, value)).unwrap();
@@ -64,7 +64,7 @@ impl PyCollection {
                 Ok(result) => {
                     // Create a Python object from the Rust result and return it
                     let py_inserted_id = bson_to_py_obj(py, &result.inserted_id);
-                    let dict = PyDict::new_bound(py);
+                    let dict = PyDict::new(py);
                     let dict_ref = dict.borrow();
                     dict_ref.set_item("inserted_id", py_inserted_id)?;
                     Ok(dict.to_object(py))
@@ -137,7 +137,6 @@ impl PyCollection {
         let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
         let update_doc = convert_py_obj_to_document(update.to_object(py).as_any())?;
 
-        // Call the Rust method `find_one`
         match self.inner.update_one_with_options(
             filter_doc,
             update_doc,
@@ -153,6 +152,29 @@ impl PyCollection {
                 err
             ))),
         }
+    }
+
+    fn aggregate(&self, pipeline: Py<PyList>) -> PyResult<PyObject> {
+        Python::with_gil(|py| {
+
+            let bson_vec_pipeline: Vec<Document> =
+                convert_py_list_to_vec_document(pipeline.to_object(py).as_any());
+            match self.inner.aggregate(bson_vec_pipeline).run() {
+                Ok(result) => {
+                    let vec_result = result.collect::<Result<Vec<Document>, _>>().unwrap();
+
+                    let py_result: Vec<Py<PyDict>> = vec_result
+                        .into_iter()
+                        .map(|x| document_to_pydict(py, x).unwrap())
+                        .collect();
+                    Ok(py_result.to_object(py))
+                }
+                Err(e) => {
+                    // Raise a Python exception on error
+                    Err(PyRuntimeError::new_err(format!("Aggregate error: {}", e)))
+                }
+            }
+        })
     }
 
     pub fn upsert_many(
@@ -211,7 +233,6 @@ impl PyCollection {
 
     pub fn delete_many(&self, filter: Py<PyDict>) -> PyResult<PyObject> {
         // Acquire the Python GIL (Global Interpreter Lock)
-        // let filter_doc = convert_py_obj_to_document(filter.to_object(py).as_any())?;
         Python::with_gil(|py| {
             let bson_doc: Document = match convert_py_obj_to_document(filter.to_object(py).as_any())
             {
@@ -239,7 +260,7 @@ impl PyCollection {
         // Acquire the Python GIL (Global Interpreter Lock)
         Python::with_gil(|py| {
             match self.inner.count_documents() {
-                Ok(result) => Ok(result.into_py(py)),
+                Ok(result) => Ok(result.into_pyobject(py).unwrap().into()),
                 Err(e) => {
                     // Raise a Python exception on error
                     Err(PyRuntimeError::new_err(format!(
