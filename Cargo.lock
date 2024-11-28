@@ -410,6 +410,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "polodb_python"
+version = "0.1.16"
+dependencies = [
+ "polodb_core",
+ "pyo3",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -437,14 +445,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f139b0662de085916d1fb67d2b4169d1addddda1919e696f3252b740b629986e"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "py-binding-polodb"
-version = "0.1.2"
-dependencies = [
- "polodb_core",
- "pyo3",
 ]
 
 [[package]]

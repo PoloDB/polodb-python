@@ -1,7 +1,13 @@
 [package]
-name = "py-binding-polodb"
-version = "0.1.2"
+name = "polodb_python"       # Must match the Python package name
+version = "0.1.16"
 edition = "2021"
+description = "Python bindings for PoloDB"
+license = "Apache License"
+license-file = "LICENSE.txt"
+repository = "https://github.com/PoloDB/polodb-python"
+homepage = "https://github.com/PoloDB/polodb-python"
+documentation = "https://github.com/PoloDB/polodb-python/blob/main/README.md"
 
 [lib]
 # The name of the native library. This is the name which will be used in Python to import the
