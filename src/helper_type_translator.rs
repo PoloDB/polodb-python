@@ -97,7 +97,7 @@ pub fn delete_result_to_pydict(
     py: Python,
     delete_result: results::DeleteResult,
 ) -> PyResult<Py<PyDict>> {
-    let py_dict = PyDict::new_bound(py);
+    let py_dict = PyDict::new(py);
 
     // Insert matched_count and modified_count into the PyDict
     py_dict.set_item("deleted_count", delete_result.deleted_count as i64)?;
@@ -109,7 +109,7 @@ pub fn update_result_to_pydict(
     py: Python,
     update_result: results::UpdateResult,
 ) -> PyResult<Py<PyDict>> {
-    let py_dict = PyDict::new_bound(py);
+    let py_dict = PyDict::new(py);
 
     // Insert matched_count and modified_count into the PyDict
     py_dict.set_item("matched_count", update_result.matched_count as i64)?;
@@ -118,7 +118,7 @@ pub fn update_result_to_pydict(
     Ok(py_dict.into())
 }
 pub fn document_to_pydict(py: Python, doc: Document) -> PyResult<Py<PyDict>> {
-    let py_dict = PyDict::new_bound(py);
+    let py_dict = PyDict::new(py);
     for (key, value) in doc {
         let py_value = bson_to_py_obj(py, &value);
         py_dict.set_item(key, py_value)?;
@@ -129,25 +129,25 @@ pub fn document_to_pydict(py: Python, doc: Document) -> PyResult<Py<PyDict>> {
 pub fn bson_to_py_obj(py: Python, bson: &Bson) -> PyObject {
     match bson {
         Bson::Null => py.None(),
-        Bson::Int32(i) => i.into_py(py),
-        Bson::Int64(i) => i.into_py(py),
-        Bson::Double(f) => PyFloat::new_bound(py, *f).into_py(py),
-        Bson::String(s) => PyString::new_bound(py, s).into_py(py),
-        Bson::Boolean(b) => PyBool::new_bound(py, *b).into_py(py),
+        Bson::Int32(i) => i.into_pyobject(py).unwrap().into(),
+        Bson::Int64(i) => i.into_pyobject(py).unwrap().into(),
+        Bson::Double(f) => PyFloat::new(py, *f).into_pyobject(py).unwrap().into(),
+        Bson::String(s) => PyString::new(py, s).into_pyobject(py).unwrap().into(),
+        Bson::Boolean(b) => PyBool::new(py, *b).into_py(py),
         Bson::Array(arr) => {
             // Create an empty PyList without specifying a slice
-            let py_list = PyList::empty_bound(py); // Use empty method instead of new_bound
+            let py_list = PyList::empty(py); // Use empty method instead of new
             for item in arr {
                 py_list.append(bson_to_py_obj(py, item)).unwrap();
             }
-            py_list.into_py(py)
+            py_list.into_pyobject(py).unwrap().into()
         }
         Bson::Document(doc) => {
-            let py_dict = PyDict::new_bound(py);
+            let py_dict = PyDict::new(py);
             for (key, value) in doc.iter() {
                 py_dict.set_item(key, bson_to_py_obj(py, value)).unwrap();
             }
-            py_dict.into_py(py)
+            py_dict.into_pyobject(py).unwrap().into()
         }
         Bson::RegularExpression(regex) => {
             let re_module = py.import_bound("re").unwrap();
@@ -157,10 +157,10 @@ pub fn bson_to_py_obj(py: Python, bson: &Bson) -> PyObject {
                 .to_object(py)
         }
         // Handle JavaScript code
-        Bson::JavaScriptCode(code) => PyString::new_bound(py, code).into_py(py),
-        Bson::Timestamp(ts) => (ts.time, ts.increment).into_py(py),
-        Bson::Binary(bin) => PyBytes::new_bound(py, &bin.bytes).into_py(py),
-        Bson::ObjectId(oid) => PyString::new_bound(py, &oid.to_hex()).into_py(py),
+        Bson::JavaScriptCode(code) => PyString::new(py, code).into_pyobject(py).unwrap().into(),
+        Bson::Timestamp(ts) => (ts.time, ts.increment).into_pyobject(py).unwrap().into(),
+        Bson::Binary(bin) => PyBytes::new(py, &bin.bytes).into_pyobject(py).unwrap().into(),
+        Bson::ObjectId(oid) => PyString::new(py, &oid.to_hex()).into_pyobject(py).unwrap().into(),
         Bson::DateTime(dt) => {
             let timestamp = dt.timestamp_millis() / 1000;
             let datetime = py
@@ -170,7 +170,7 @@ pub fn bson_to_py_obj(py: Python, bson: &Bson) -> PyObject {
                 .unwrap();
             datetime.call1((timestamp,)).unwrap().to_object(py)
         }
-        Bson::Symbol(s) => PyString::new_bound(py, s).into_py(py),
+        Bson::Symbol(s) => PyString::new(py, s).into_pyobject(py).unwrap().into(),
 
         // Handle undefined value (deprecated)
         Bson::Undefined => py.None(),
