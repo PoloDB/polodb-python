@@ -33,6 +33,8 @@ jobs:
       - name: Test sdist
         run: |
           python -m pip install --upgrade pip
+          pip install twine
+          twine check dist/*.tar.gz
           pip install --force-reinstall --verbose dist/*.tar.gz
           python -c 'from polodb import PoloDB'
 
@@ -116,6 +118,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
+      
+      - name: Inspect Generated PKG-INFO
+        run: |
+          for file in artifacts/**/*.tar.gz; do
+            echo "Inspecting $file"
+            tar -tzf "$file" | grep PKG-INFO || echo "PKG-INFO not found"
+            tar -xOf "$file" */PKG-INFO || echo "Unable to read PKG-INFO"
+          done
 
       - name: Install Twine
         run: |

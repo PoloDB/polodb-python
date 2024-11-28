@@ -1,24 +1,23 @@
 [project]
 name = "polodb-python"
-version = "0.1.14"
+version = "0.1.15"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
-
+license = { file = "LICENSE.txt" }
+authors = [
+    { name = "SENHAJI RHAZI Hamza", email = "hamza.senhajirhazi@gmail.com" },
+]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-
-dependencies = [
-    "tomli>=2.0.2",
-]
+dependencies = ["tomli>=2.0.2"]
 
 [build-system]
 requires = ["maturin>=1,<2"]
 build-backend = "maturin"
-
 
 [dependency-groups]
 dev = [
@@ -38,9 +37,9 @@ default-groups = ["dev"]
 polodb = { workspace = true }
 
 [tool.pytest.ini_options]
-pythonpath = [
-  "."
-]
+pythonpath = ["."]
 
 [tool.maturin]
 include = ["polodb/**/*"]
+sdist-include = ["Cargo.toml", "README.md", "LICENSE.txt"]
+
