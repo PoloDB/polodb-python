@@ -10,10 +10,11 @@ pub fn convert_py_list_to_vec_document<'a>(py_list_obj: &'a Py<PyAny>) -> Vec<Do
         if let Ok(py_list) = py_list_obj.downcast_bound::<PyList>(py) {
             // If downcast is successful, return an iterator over the list's items
             let iter = py_list.iter().map(|item| {
-                let py_obj: Py<PyAny> = item.to_object(item.py());
+                // let py_obj: Py<PyAny> = item.to_object(item.py());
+                let py_obj2 = item.into_pyobject(py).unwrap();
                 // Convert each item (expected to be a dictionary) into a BSON document
 
-                convert_py_obj_to_document(&py_obj).unwrap()
+                convert_py_obj_to_document(py_obj2.as_unbound()).unwrap()
             });
             Vec::from_iter(iter)
         } else {
@@ -32,7 +33,8 @@ pub fn convert_py_obj_to_document(py_obj: &Py<PyAny>) -> PyResult<Document> {
             for (key, value) in dict.iter() {
                 // Use `iter()` on the `PyDict`
                 let key: String = key.extract()?; // Extract the key as a string
-                let bson_value = convert_py_obj_to_bson(value.to_object(py).as_any())?; // Convert value to BSON
+                let bson_value =
+                    convert_py_obj_to_bson(value.into_pyobject(py).unwrap().as_unbound())?; // Convert value to BSON
                 doc.insert(key, bson_value);
             }
             Ok(doc)
@@ -70,7 +72,8 @@ pub fn convert_py_obj_to_bson(py_obj: &Py<PyAny>) -> PyResult<Bson> {
             for (key, value) in dict.iter() {
                 let key_str: String = key.extract::<String>()?;
 
-                let bson_value = convert_py_obj_to_bson(value.to_object(py).as_any())?;
+                let bson_value =
+                    convert_py_obj_to_bson(value.into_pyobject(py).unwrap().as_unbound())?;
                 bson_doc.insert(key_str, bson_value);
             }
             Ok(Bson::Document(bson_doc))
@@ -79,7 +82,8 @@ pub fn convert_py_obj_to_bson(py_obj: &Py<PyAny>) -> PyResult<Bson> {
         else if let Ok(list) = py_obj.downcast_bound::<PyList>(py) {
             let mut bson_array = Vec::new();
             for item in list.iter() {
-                let bson_item = convert_py_obj_to_bson(item.to_object(py).as_any())?;
+                let bson_item =
+                    convert_py_obj_to_bson(item.into_pyobject(py).unwrap().as_unbound())?;
                 bson_array.push(bson_item);
             }
             Ok(Bson::Array(bson_array))
@@ -133,7 +137,15 @@ pub fn bson_to_py_obj(py: Python, bson: &Bson) -> PyObject {
         Bson::Int64(i) => i.into_pyobject(py).unwrap().into(),
         Bson::Double(f) => PyFloat::new(py, *f).into_pyobject(py).unwrap().into(),
         Bson::String(s) => PyString::new(py, s).into_pyobject(py).unwrap().into(),
-        Bson::Boolean(b) => PyBool::new(py, *b).into_py(py),
+        // Bson::Boolean(b) => {
+        //     // PyBool::new(py, *b) -> &PyBool (borrowed), convert it with Py::from
+        //     // Create a &PyBool
+        //     let py_bool_ref = PyBool::new(py, *b).as_unbound().clone_ref(py);
+        //     // Coerce &PyBool to &PyAny by assignment
+        //     let py_any: &PyAny = py_bool_ref ;
+        //     py_bool_ref
+        // }
+        Bson::Boolean(b) => PyBool::new(py, *b).as_unbound().clone_ref(py).into_any(),
         Bson::Array(arr) => {
             // Create an empty PyList without specifying a slice
             let py_list = PyList::empty(py); // Use empty method instead of new
@@ -150,25 +162,34 @@ pub fn bson_to_py_obj(py: Python, bson: &Bson) -> PyObject {
             py_dict.into_pyobject(py).unwrap().into()
         }
         Bson::RegularExpression(regex) => {
-            let re_module = py.import_bound("re").unwrap();
+            let re_module = py.import("re").unwrap();
             re_module
                 .call_method1("compile", (regex.pattern.as_str(),))
                 .unwrap()
-                .to_object(py)
+                .into_pyobject(py)
+                .unwrap()
+                .into()
         }
         // Handle JavaScript code
         Bson::JavaScriptCode(code) => PyString::new(py, code).into_pyobject(py).unwrap().into(),
         Bson::Timestamp(ts) => (ts.time, ts.increment).into_pyobject(py).unwrap().into(),
-        Bson::Binary(bin) => PyBytes::new(py, &bin.bytes).into_pyobject(py).unwrap().into(),
-        Bson::ObjectId(oid) => PyString::new(py, &oid.to_hex()).into_pyobject(py).unwrap().into(),
+        Bson::Binary(bin) => PyBytes::new(py, &bin.bytes)
+            .into_pyobject(py)
+            .unwrap()
+            .into(),
+        Bson::ObjectId(oid) => PyString::new(py, &oid.to_hex())
+            .into_pyobject(py)
+            .unwrap()
+            .into(),
         Bson::DateTime(dt) => {
             let timestamp = dt.timestamp_millis() / 1000;
-            let datetime = py
-                .import_bound("datetime")
+            let datetime = py.import("datetime").unwrap().getattr("datetime").unwrap();
+            datetime
+                .call1((timestamp,))
                 .unwrap()
-                .getattr("datetime")
-                .unwrap();
-            datetime.call1((timestamp,)).unwrap().to_object(py)
+                .into_pyobject(py)
+                .unwrap()
+                .into()
         }
         Bson::Symbol(s) => PyString::new(py, s).into_pyobject(py).unwrap().into(),
 

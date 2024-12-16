@@ -164,4 +164,10 @@ jobs:
           twine check artifacts/**/*.tar.gz 
           twine upload artifacts/**/*.tar.gz 
           twine check artifacts/**/*.whl
-          twine upload artifacts/**/*.whl
+          for file in artifacts/**/*.whl; do
+            if [[ -f "$file" ]]; then
+              echo "Uploading $file..."
+              twine upload "$file" || echo "Failed to upload $file"
+            fi
+          done
+          # twine upload artifacts/**/*.whl

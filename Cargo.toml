@@ -1,6 +1,6 @@
 [package]
 name = "polodb_python"       # Must match the Python package name
-version = "0.1.16"
+version = "0.1.17"
 edition = "2021"
 description = "Python bindings for PoloDB"
 license = "Apache License"
