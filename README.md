@@ -37,6 +37,27 @@ with PoloDB("app.db") as db:
 
 Collections can also be accessed as attributes (`db.books`), though item access is preferable when a name is dynamic or collides with a database attribute.
 
+## Database configuration
+
+`PoloDBConfig` exposes PoloDB Core's storage settings while preserving its defaults:
+
+```python
+from polodb import PoloDB, PoloDBConfig
+
+config = PoloDBConfig(
+    init_block_count=32,
+    journal_full_size=2_000,
+    lsm_page_size=8_192,
+    lsm_block_size=8 * 1024 * 1024,
+    sync_log_count=500,
+)
+
+with PoloDB("app.db", config=config) as db:
+    print(db.config)
+```
+
+The same configuration is retained if a `PoloDB` context is closed and later reopened.
+
 ## Collection API
 
 ### Insert and query

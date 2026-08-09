@@ -68,9 +68,26 @@ class _Transaction:
     def rollback(self) -> None: ...
 
 class _Database:
-    def __init__(self, path: str) -> None: ...
+    def __init__(
+        self,
+        path: str,
+        *,
+        init_block_count: int = 16,
+        journal_full_size: int = 1000,
+        lsm_page_size: int = 4096,
+        lsm_block_size: int = 4 * 1024 * 1024,
+        sync_log_count: int = 1000,
+    ) -> None: ...
     @staticmethod
-    def open_path(path: str) -> _Database: ...
+    def open_path(
+        path: str,
+        *,
+        init_block_count: int = 16,
+        journal_full_size: int = 1000,
+        lsm_page_size: int = 4096,
+        lsm_block_size: int = 4 * 1024 * 1024,
+        sync_log_count: int = 1000,
+    ) -> _Database: ...
     def create_collection(self, name: str) -> None: ...
     def collection(self, name: str) -> _Collection: ...
     def drop_collection(self, name: str) -> None: ...

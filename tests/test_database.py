@@ -14,9 +14,29 @@ from polodb import (
     InsertOneResult,
     ObjectId,
     PoloDB,
+    PoloDBConfig,
     PoloDBError,
     UpdateResult,
 )
+
+
+def test_custom_database_config(db_path: Path) -> None:
+    config = PoloDBConfig(
+        init_block_count=32,
+        journal_full_size=2048,
+        lsm_page_size=8192,
+        lsm_block_size=8 * 1024 * 1024,
+        sync_log_count=500,
+    )
+
+    configured = PoloDB(db_path, config=config)
+    with configured as configured_db:
+        assert configured_db.config == config
+        configured_db["configured"].insert_one({"works": True})
+
+    with configured as reopened_db:
+        assert reopened_db.config == config
+        assert reopened_db["configured"].find_one({"works": True}) is not None
 
 
 def test_database_protocols(db: PoloDB, db_path: Path) -> None:

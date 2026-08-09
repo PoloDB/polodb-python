@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any, Union
 
 from ._rust import _Collection, _Cursor, _Database, _Transaction
@@ -9,6 +10,17 @@ from .results import DeleteResult, InsertManyResult, InsertOneResult, UpdateResu
 
 Document = dict[str, Any]
 Filter = Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class PoloDBConfig:
+    """Storage configuration passed to PoloDB Core when opening a database."""
+
+    init_block_count: int = 16
+    journal_full_size: int = 1000
+    lsm_page_size: int = 4096
+    lsm_block_size: int = 4 * 1024 * 1024
+    sync_log_count: int = 1000
 
 
 class Cursor(Iterator[Document]):
@@ -206,9 +218,15 @@ class PoloDB:
     ``path`` accepts strings and any object implementing ``os.PathLike``.
     """
 
-    def __init__(self, path: Union[str, os.PathLike[str]]) -> None:  # noqa: UP007
+    def __init__(
+        self,
+        path: Union[str, os.PathLike[str]],  # noqa: UP007
+        *,
+        config: PoloDBConfig | None = None,
+    ) -> None:
         self._path: str = os.fspath(path)
-        self._native: _Database | None = _Database(self._path)
+        self._config = config or PoloDBConfig()
+        self._native: _Database | None = self._open()
 
     def __repr__(self) -> str:
         return f"PoloDB({self._path!r})"
@@ -217,6 +235,20 @@ class PoloDB:
     def path(self) -> str:
         return self._path
 
+    @property
+    def config(self) -> PoloDBConfig:
+        return self._config
+
+    def _open(self) -> _Database:
+        return _Database(
+            self._path,
+            init_block_count=self._config.init_block_count,
+            journal_full_size=self._config.journal_full_size,
+            lsm_page_size=self._config.lsm_page_size,
+            lsm_block_size=self._config.lsm_block_size,
+            sync_log_count=self._config.sync_log_count,
+        )
+
     def _db(self) -> _Database:
         if self._native is None:
             raise RuntimeError("database is closed")
@@ -224,7 +256,7 @@ class PoloDB:
 
     def __enter__(self) -> PoloDB:
         if self._native is None:
-            self._native = _Database(self._path)
+            self._native = self._open()
         return self
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:

@@ -5,7 +5,7 @@ use polodb_core::bson::{Bson, Document};
 use polodb_core::options::UpdateOptions;
 use polodb_core::results::{DeleteResult, InsertManyResult, InsertOneResult, UpdateResult};
 use polodb_core::{
-    ClientCursor, Collection, CollectionT, Database, IndexModel, IndexOptions, Transaction,
+    ClientCursor, Collection, CollectionT, Config, Database, IndexModel, IndexOptions, Transaction,
     TransactionalCollection,
 };
 use pyo3::exceptions::{PyOSError, PyRuntimeError};
@@ -356,13 +356,59 @@ pub struct PyDatabase {
 #[pymethods]
 impl PyDatabase {
     #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        Self::open_path(path)
+    #[pyo3(signature = (
+        path,
+        *,
+        init_block_count=16,
+        journal_full_size=1000,
+        lsm_page_size=4096,
+        lsm_block_size=4 * 1024 * 1024,
+        sync_log_count=1000,
+    ))]
+    fn new(
+        path: &str,
+        init_block_count: u64,
+        journal_full_size: u64,
+        lsm_page_size: u32,
+        lsm_block_size: u32,
+        sync_log_count: u64,
+    ) -> PyResult<Self> {
+        Self::open_path(
+            path,
+            init_block_count,
+            journal_full_size,
+            lsm_page_size,
+            lsm_block_size,
+            sync_log_count,
+        )
     }
 
     #[staticmethod]
-    fn open_path(path: &str) -> PyResult<Self> {
-        Database::open_path(path)
+    #[pyo3(signature = (
+        path,
+        *,
+        init_block_count=16,
+        journal_full_size=1000,
+        lsm_page_size=4096,
+        lsm_block_size=4 * 1024 * 1024,
+        sync_log_count=1000,
+    ))]
+    fn open_path(
+        path: &str,
+        init_block_count: u64,
+        journal_full_size: u64,
+        lsm_page_size: u32,
+        lsm_block_size: u32,
+        sync_log_count: u64,
+    ) -> PyResult<Self> {
+        let config = Config {
+            init_block_count,
+            journal_full_size,
+            lsm_page_size,
+            lsm_block_size,
+            sync_log_count,
+        };
+        Database::open_path_with_config(path, config)
             .map(|inner| Self { inner })
             .map_err(|error| PyOSError::new_err(error.to_string()))
     }
