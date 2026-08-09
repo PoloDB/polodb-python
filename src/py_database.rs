@@ -1,10 +1,11 @@
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use polodb_core::bson::{Bson, Document};
 use polodb_core::options::UpdateOptions;
 use polodb_core::results::{DeleteResult, InsertManyResult, InsertOneResult, UpdateResult};
 use polodb_core::{
-    Collection, CollectionT, Database, IndexModel, IndexOptions, Transaction,
+    ClientCursor, Collection, CollectionT, Database, IndexModel, IndexOptions, Transaction,
     TransactionalCollection,
 };
 use pyo3::exceptions::{PyOSError, PyRuntimeError};
@@ -54,6 +55,33 @@ fn delete_result(py: Python<'_>, result: DeleteResult) -> PyResult<Py<PyDict>> {
 enum CollectionHandle {
     Database(Collection<Document>),
     Transaction(TransactionalCollection<Document>),
+}
+
+#[pyclass(name = "_Cursor")]
+pub struct PyCursor {
+    inner: Mutex<ClientCursor<Document>>,
+}
+
+#[pymethods]
+impl PyCursor {
+    fn __iter__(cursor: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        cursor
+    }
+
+    fn __next__(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        let mut cursor = self
+            .inner
+            .lock()
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        match cursor.advance().map_err(database_error)? {
+            true => cursor
+                .deserialize_current()
+                .map_err(database_error)
+                .and_then(|document| document_to_py(py, document))
+                .map(Some),
+            false => Ok(None),
+        }
+    }
 }
 
 #[pyclass(name = "_Collection")]
@@ -109,16 +137,15 @@ impl PyCollection {
     #[pyo3(signature = (filter=None, *, skip=0, limit=0, sort=None))]
     fn find(
         &self,
-        py: Python<'_>,
         filter: Option<&Bound<'_, PyAny>>,
         skip: u64,
         limit: u64,
         sort: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Vec<Py<PyDict>>> {
+    ) -> PyResult<PyCursor> {
         let filter = empty_or_document(filter)?;
         let sort = sort.map(py_to_document).transpose()?;
 
-        let documents: Vec<Document> = match &self.inner {
+        let cursor = match &self.inner {
             CollectionHandle::Database(collection) => {
                 let mut find = collection.find(filter);
                 if skip != 0 {
@@ -130,10 +157,7 @@ impl PyCollection {
                 if let Some(sort) = sort {
                     find = find.sort(sort);
                 }
-                find.run()
-                    .map_err(database_error)?
-                    .collect::<Result<_, _>>()
-                    .map_err(database_error)?
+                find.run().map_err(database_error)?
             }
             CollectionHandle::Transaction(collection) => {
                 let mut find = collection.find(filter);
@@ -146,17 +170,12 @@ impl PyCollection {
                 if let Some(sort) = sort {
                     find = find.sort(sort);
                 }
-                find.run()
-                    .map_err(database_error)?
-                    .collect::<Result<_, _>>()
-                    .map_err(database_error)?
+                find.run().map_err(database_error)?
             }
         };
-
-        documents
-            .into_iter()
-            .map(|document| document_to_py(py, document))
-            .collect()
+        Ok(PyCursor {
+            inner: Mutex::new(cursor),
+        })
     }
 
     #[pyo3(signature = (filter=None))]

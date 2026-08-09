@@ -21,17 +21,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          activate-environment: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - name: Install Python tools
-        run: python -m pip install "maturin>=1.14,<2" "mypy>=1.17,<2" "pytest>=8.4" "ruff>=0.12"
+      - name: Install locked Python tools
+        run: uv sync --locked
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: mypy polodb
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy polodb
+      - run: uv run ty check
 
   test:
     name: Python ${{ matrix.python }} on ${{ matrix.os }}
@@ -40,21 +45,20 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.9", "3.14"]
+        python: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          activate-environment: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}-${{ matrix.python }}
-      - name: Build extension
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release --out dist --interpreter python
-      - run: python -m pip install --find-links dist polodb-python
-      - run: python -m pip install "pytest>=8.4"
-      - run: python -m pytest
+      - name: Build and install locked project
+        run: uv sync --locked
+      - run: uv run python -m pytest

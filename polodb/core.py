@@ -4,11 +4,62 @@ import os
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any, Union
 
-from ._rust import _Collection, _Database, _Transaction
+from ._rust import _Collection, _Cursor, _Database, _Transaction
 from .results import DeleteResult, InsertManyResult, InsertOneResult, UpdateResult
 
 Document = dict[str, Any]
 Filter = Mapping[str, Any]
+
+
+class Cursor(Iterator[Document]):
+    """A lazy, chainable cursor over query results."""
+
+    def __init__(self, native: _Collection, filter: Filter | None = None) -> None:
+        self._native = native
+        self._filter = filter
+        self._skip = 0
+        self._limit = 0
+        self._sort: Filter | None = None
+        self._cursor: _Cursor | None = None
+
+    def __iter__(self) -> Cursor:
+        return self
+
+    def __next__(self) -> Document:
+        if self._cursor is None:
+            self._cursor = self._native.find(
+                self._filter,
+                skip=self._skip,
+                limit=self._limit,
+                sort=self._sort,
+            )
+        return next(self._cursor)
+
+    def _ensure_not_started(self) -> None:
+        if self._cursor is not None:
+            raise RuntimeError("cursor options cannot be changed after iteration has started")
+
+    def skip(self, value: int) -> Cursor:
+        self._ensure_not_started()
+        if value < 0:
+            raise ValueError("skip must be non-negative")
+        self._skip = value
+        return self
+
+    def limit(self, value: int) -> Cursor:
+        self._ensure_not_started()
+        if value < 0:
+            raise ValueError("limit must be non-negative")
+        self._limit = value
+        return self
+
+    def sort(self, value: Filter) -> Cursor:
+        self._ensure_not_started()
+        self._sort = value
+        return self
+
+    def to_list(self) -> list[Document]:
+        return list(self)
 
 
 class Collection:
@@ -42,11 +93,12 @@ class Collection:
         skip: int = 0,
         limit: int = 0,
         sort: Filter | None = None,
-    ) -> list[Document]:
-        """Return matching documents, optionally sorted, skipped, and limited."""
-        if skip < 0 or limit < 0:
-            raise ValueError("skip and limit must be non-negative")
-        return list(self._native.find(filter, skip=skip, limit=limit, sort=sort))
+    ) -> Cursor:
+        """Return a lazy cursor, optionally sorted, skipped, and limited."""
+        cursor = Cursor(self._native, filter)
+        if sort is not None:
+            cursor.sort(sort)
+        return cursor.skip(skip).limit(limit)
 
     def find_iter(
         self,
@@ -55,9 +107,9 @@ class Collection:
         skip: int = 0,
         limit: int = 0,
         sort: Filter | None = None,
-    ) -> Iterator[Document]:
-        """Iterate over matching documents."""
-        return iter(self.find(filter, skip=skip, limit=limit, sort=sort))
+    ) -> Cursor:
+        """Compatibility alias for :meth:`find`."""
+        return self.find(filter, skip=skip, limit=limit, sort=sort)
 
     def update_one(
         self,

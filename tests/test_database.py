@@ -8,6 +8,7 @@ import pytest
 from polodb import (
     POLODB_CORE_VERSION,
     Collection,
+    Cursor,
     DeleteResult,
     InsertManyResult,
     InsertOneResult,
@@ -83,12 +84,18 @@ def test_insert_many_find_sort_skip_and_limit(db: PoloDB) -> None:
     assert len(collection) == 4
     assert collection.len() == 4
 
-    documents = collection.find({}, sort={"score": 1}, skip=1, limit=2)
+    documents = collection.find({}).sort({"score": 1}).skip(1).limit(2)
+    assert isinstance(documents, Cursor)
     assert [document["score"] for document in documents] == [2, 3]
     assert [document["score"] for document in collection.find_iter({"score": {"$gt": 2}})] == [3, 4]
 
     with pytest.raises(ValueError, match="non-negative"):
         collection.find(skip=-1)
+
+    started = collection.find({})
+    next(started)
+    with pytest.raises(RuntimeError, match="after iteration"):
+        started.limit(1)
 
 
 def test_update_delete_and_aggregate(db: PoloDB) -> None:

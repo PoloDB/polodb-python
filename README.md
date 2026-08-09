@@ -2,13 +2,15 @@
 
 Fast, typed Python bindings for [PoloDB](https://www.polodb.org), an embedded document database with a MongoDB-like API. The database runs in-process and stores its data locally—there is no server to install or manage.
 
-Version 0.2 uses PoloDB Core 5.3, PyO3 0.29, and CPython's stable ABI. Published wheels support CPython 3.9 and newer on Linux, macOS, and Windows.
+Version 0.2 uses PoloDB Core 5.3, PyO3 0.29, and CPython's stable ABI. Published wheels support CPython 3.10 and newer on Linux, macOS, and Windows.
 
 ## Installation
 
 ```bash
-python -m pip install polodb-python
+uv add polodb-python
 ```
+
+The distribution name is `polodb-python`; `uv add polodb` refers to a different, obsolete package.
 
 ## Quick start
 
@@ -24,10 +26,12 @@ with PoloDB("app.db") as db:
     book = books.find_one({"_id": inserted.inserted_id})
     print(book)
 
-    recent = books.find(
-        {"year": {"$gte": 2000}},
-        sort={"year": -1},
-        limit=10,
+    recent = (
+        books.find(
+            {"year": {"$gte": 2000}},
+        )
+        .sort({"year": -1})
+        .limit(10)
     )
 ```
 
@@ -52,7 +56,7 @@ for book in books.find_iter({"year": {"$lt": 1950}}):
     print(book)
 ```
 
-`find()` accepts `skip`, `limit`, and `sort` keyword arguments. An omitted filter means an empty filter.
+`find()` returns a lazy cursor, so documents are decoded as they are consumed rather than loaded into memory at once. Cursors support chainable `skip()`, `limit()`, and `sort()` methods; the equivalent keyword arguments on `find()` remain available. An omitted filter means an empty filter.
 
 ### Update and delete
 
@@ -154,7 +158,7 @@ Most CRUD code continues to work. Notable improvements and changes in 0.2 are:
 
 - generated IDs are `ObjectId` values instead of lossy strings; use `str(id)` or `id.hex` when text is required;
 - write results are typed mapping objects rather than plain dictionaries;
-- `find()` always returns a list rather than `Optional[list]`;
+- `find()` returns a lazy, chainable cursor instead of an optional list; call `.to_list()` when a list is needed;
 - `len(collection)` and `count_documents()` are preferred; `collection.len()` remains as a compatibility alias;
 - context managers now close databases and correctly commit or roll back transactions;
 - unsupported BSON values raise an exception instead of silently becoming `None` or panicking the interpreter.
@@ -167,11 +171,12 @@ uv run maturin develop
 uv run pytest
 uv run ruff check .
 uv run mypy polodb
+uv run ty check
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-Releases are built from `vX.Y.Z` tags. The tag must match both `pyproject.toml` and `Cargo.toml`. PyPI publication uses a Trusted Publisher configured for the `pypi` GitHub environment.
+Releases are built from `vX.Y.Z` tags. The tag must match both `pyproject.toml` and `Cargo.toml`. PyPI publication uses the repository's `PYPI_TOKEN` secret.
 
 ## License
 

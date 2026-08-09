@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
 POLODB_CORE_VERSION: str
@@ -27,7 +27,7 @@ class _Collection:
         skip: int = 0,
         limit: int = 0,
         sort: Mapping[str, Any] | None = None,
-    ) -> list[dict[str, Any]]: ...
+    ) -> _Cursor: ...
     def update_one(
         self,
         filter: Mapping[str, Any],
@@ -55,6 +55,10 @@ class _Collection:
     ) -> str: ...
     def drop_index(self, name: str) -> None: ...
     def drop(self) -> None: ...
+
+class _Cursor(Iterator[dict[str, Any]]):
+    def __iter__(self) -> _Cursor: ...
+    def __next__(self) -> dict[str, Any]: ...
 
 class _Transaction:
     @property

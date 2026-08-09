@@ -3,7 +3,7 @@ name = "polodb-python"
 version = "0.2.0"
 description = "Modern Python bindings for the embedded PoloDB document database"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [
     { name = "SENHAJI RHAZI Hamza", email = "hamza.senhajirhazi@gmail.com" },
@@ -17,7 +17,6 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -41,9 +40,10 @@ build-backend = "maturin"
 [dependency-groups]
 dev = [
     "maturin>=1.14,<2",
-    "mypy>=1.17,<2",
-    "pytest>=8.4",
-    "ruff>=0.12",
+    "mypy>=2.3",
+    "pytest>=9.0.3",
+    "ruff>=0.16.2",
+    "ty>=0.0.64",
 ]
 
 [tool.uv]
@@ -61,12 +61,15 @@ include = ["polodb/py.typed", "LICENSE.txt"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 strict = true
 files = ["polodb"]
+
+[tool.ty.src]
+include = ["polodb"]

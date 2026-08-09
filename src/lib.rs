@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 mod helper_type_translator;
 mod py_database;
 
-use py_database::{PyCollection, PyDatabase, PyTransaction};
+use py_database::{PyCollection, PyCursor, PyDatabase, PyTransaction};
 
 create_exception!(_rust, PoloDBError, PyException);
 
@@ -61,6 +61,7 @@ impl PyObjectId {
 fn _rust(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyDatabase>()?;
     module.add_class::<PyCollection>()?;
+    module.add_class::<PyCursor>()?;
     module.add_class::<PyTransaction>()?;
     module.add_class::<PyObjectId>()?;
     module.add("PoloDBError", module.py().get_type::<PoloDBError>())?;
