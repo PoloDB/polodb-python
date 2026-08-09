@@ -57,10 +57,12 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-            manylinux: "2014"
+            manylinux: "2_28"
+            before_script_linux: dnf install -y clang-devel
           - os: ubuntu-latest
             target: aarch64
-            manylinux: "2014"
+            manylinux: "2_28"
+            before_script_linux: dnf install -y clang-devel
           - os: macos-15-intel
             target: x86_64
           - os: macos-latest
@@ -74,6 +76,7 @@ jobs:
           command: build
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
+          before-script-linux: ${{ matrix.before_script_linux || '' }}
           args: --release --out dist
       - uses: actions/upload-artifact@v7
         with:
