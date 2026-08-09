@@ -1,381 +1,395 @@
-use crate::helper_type_translator::{
-    bson_to_py_obj, convert_py_list_to_vec_document, convert_py_obj_to_document,
-    delete_result_to_pydict, document_to_pydict, update_result_to_pydict,
-};
-use polodb_core::bson::Document;
-use polodb_core::options::UpdateOptions;
-use polodb_core::{Collection, CollectionT, Database};
-use pyo3::exceptions::PyOSError;
-use pyo3::exceptions::PyRuntimeError; // Import PyRuntimeError for error handling
-use pyo3::{prelude::*, IntoPyObjectExt};
-use pyo3::types::{PyDict, PyList};
-use std::borrow::Borrow;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-#[pyclass]
+use polodb_core::bson::{Bson, Document};
+use polodb_core::options::UpdateOptions;
+use polodb_core::results::{DeleteResult, InsertManyResult, InsertOneResult, UpdateResult};
+use polodb_core::{
+    Collection, CollectionT, Database, IndexModel, IndexOptions, Transaction,
+    TransactionalCollection,
+};
+use pyo3::exceptions::{PyOSError, PyRuntimeError};
+use pyo3::prelude::*;
+use pyo3::types::{PyAny, PyDict};
+
+use crate::PoloDBError;
+use crate::helper_type_translator::{
+    bson_to_py, document_to_py, py_iterable_to_documents, py_to_document,
+};
+
+fn database_error(error: polodb_core::Error) -> PyErr {
+    PoloDBError::new_err(error.to_string())
+}
+
+fn empty_or_document(value: Option<&Bound<'_, PyAny>>) -> PyResult<Document> {
+    value.map_or_else(|| Ok(Document::new()), py_to_document)
+}
+
+fn insert_one_result(py: Python<'_>, result: InsertOneResult) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("inserted_id", bson_to_py(py, &result.inserted_id)?)?;
+    Ok(dict.unbind())
+}
+
+fn insert_many_result(py: Python<'_>, result: InsertManyResult) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    for (index, value) in result.inserted_ids {
+        dict.set_item(index, bson_to_py(py, &value)?)?;
+    }
+    Ok(dict.unbind())
+}
+
+fn update_result(py: Python<'_>, result: UpdateResult) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("matched_count", result.matched_count)?;
+    dict.set_item("modified_count", result.modified_count)?;
+    Ok(dict.unbind())
+}
+
+fn delete_result(py: Python<'_>, result: DeleteResult) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("deleted_count", result.deleted_count)?;
+    Ok(dict.unbind())
+}
+
+enum CollectionHandle {
+    Database(Collection<Document>),
+    Transaction(TransactionalCollection<Document>),
+}
+
+#[pyclass(name = "_Collection")]
 pub struct PyCollection {
-    inner: Arc<Collection<Document>>, // Use Arc for thread-safe shared ownership
+    inner: CollectionHandle,
+}
+
+impl PyCollection {
+    fn from_database(database: &Database, name: &str) -> Self {
+        Self {
+            inner: CollectionHandle::Database(database.collection(name)),
+        }
+    }
+
+    fn from_transaction(transaction: &Transaction, name: &str) -> Self {
+        Self {
+            inner: CollectionHandle::Transaction(transaction.collection(name)),
+        }
+    }
+}
+
+macro_rules! collection_call {
+    ($self:expr, $method:ident ( $($argument:expr),* $(,)? )) => {
+        match &$self.inner {
+            CollectionHandle::Database(collection) => collection.$method($($argument),*),
+            CollectionHandle::Transaction(collection) => collection.$method($($argument),*),
+        }
+    };
 }
 
 #[pymethods]
 impl PyCollection {
-    pub fn name(&self) -> &str {
-        self.inner.name()
+    #[getter]
+    fn name(&self) -> &str {
+        match &self.inner {
+            CollectionHandle::Database(collection) => collection.name(),
+            CollectionHandle::Transaction(collection) => collection.name(),
+        }
     }
 
-    pub fn insert_many(&self, doc: Py<PyList>) -> PyResult<PyObject> {
-        // Acquire the Python GIL (Global Interpreter Lock)
-        Python::with_gil(|py| {
-            // Now you can use `py` inside this block.
-
-            // Example: Create a Python object or interact with the Python runtime.
-            let bson_vec_docs: Vec<Document> =
-                convert_py_list_to_vec_document(&doc.into_py_any(py).unwrap());
-            // let bson_doc = convert_py_to_bson(doc);
-            match self.inner.insert_many(bson_vec_docs) {
-                Ok(result) => {
-                    // Create a Python object from the Rust result and return it
-                    let dict: Bound<'_, PyDict> = PyDict::new(py);
-
-                    for (key, value) in &result.inserted_ids {
-                        dict.set_item(key, bson_to_py_obj(py, value)).unwrap();
-                    }
-
-                    Ok(dict.into_py_any(py).unwrap())
-                }
-                Err(e) => {
-                    // Raise a Python exception on error
-                    Err(PyRuntimeError::new_err(format!("Insert many error: {}", e)))
-                }
-            }
-        })
+    fn insert_one(&self, py: Python<'_>, document: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+        let document = py_to_document(document)?;
+        let result = collection_call!(self, insert_one(&document)).map_err(database_error)?;
+        insert_one_result(py, result)
     }
 
-    pub fn insert_one(&self, doc: Py<PyDict>) -> PyResult<PyObject> {
-        // Acquire the Python GIL (Global Interpreter Lock)
-        Python::with_gil(|py| {
-            let bson_doc: Document = match convert_py_obj_to_document(&doc.into_py_any(py).unwrap()) {
-                Ok(d) => d,
-                Err(e) => return Err(PyRuntimeError::new_err(format!("Insert many error: {}", e))),
-            };
-            // let bson_doc = convert_py_to_bson(doc);
-            match self.inner.insert_one(bson_doc) {
-                Ok(result) => {
-                    // Create a Python object from the Rust result and return it
-                    let py_inserted_id = bson_to_py_obj(py, &result.inserted_id);
-                    let dict = PyDict::new(py);
-                    let dict_ref = dict.borrow();
-                    dict_ref.set_item("inserted_id", py_inserted_id)?;
-                    Ok(dict.into_py_any(py).unwrap())
-
-                    // Ok(Py::new(py, result)?.to_object(py))
-                }
-                Err(e) => {
-                    // Raise a Python exception on error
-                    Err(PyRuntimeError::new_err(format!("Insert error: {}", e)))
-                }
-            }
-        })
+    fn insert_many(&self, py: Python<'_>, documents: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+        let documents = py_iterable_to_documents(documents)?;
+        let result = collection_call!(self, insert_many(documents)).map_err(database_error)?;
+        insert_many_result(py, result)
     }
 
-    pub fn update_one(
+    #[pyo3(signature = (filter=None, *, skip=0, limit=0, sort=None))]
+    fn find(
         &self,
-        py: Python,
-        filter: Py<PyDict>,
-        update: Py<PyDict>,
-    ) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(&filter.into_py_any(py).unwrap())?;
-        let update_doc = convert_py_obj_to_document(&update.into_py_any(py).unwrap())?;
+        py: Python<'_>,
+        filter: Option<&Bound<'_, PyAny>>,
+        skip: u64,
+        limit: u64,
+        sort: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Vec<Py<PyDict>>> {
+        let filter = empty_or_document(filter)?;
+        let sort = sort.map(py_to_document).transpose()?;
 
-        // Call the Rust method `find_one`
-        match self.inner.update_one(filter_doc, update_doc) {
-            Ok(update_result) => {
-                // Convert BSON Document to Python Dict
-                let py_result = update_result_to_pydict(py, update_result).unwrap();
-                Ok(Some(py_result.into_py_any(py).unwrap()))
+        let documents: Vec<Document> = match &self.inner {
+            CollectionHandle::Database(collection) => {
+                let mut find = collection.find(filter);
+                if skip != 0 {
+                    find = find.skip(skip);
+                }
+                if limit != 0 {
+                    find = find.limit(limit);
+                }
+                if let Some(sort) = sort {
+                    find = find.sort(sort);
+                }
+                find.run()
+                    .map_err(database_error)?
+                    .collect::<Result<_, _>>()
+                    .map_err(database_error)?
             }
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Update one error: {}",
-                err
-            ))),
-        }
+            CollectionHandle::Transaction(collection) => {
+                let mut find = collection.find(filter);
+                if skip != 0 {
+                    find = find.skip(skip);
+                }
+                if limit != 0 {
+                    find = find.limit(limit);
+                }
+                if let Some(sort) = sort {
+                    find = find.sort(sort);
+                }
+                find.run()
+                    .map_err(database_error)?
+                    .collect::<Result<_, _>>()
+                    .map_err(database_error)?
+            }
+        };
+
+        documents
+            .into_iter()
+            .map(|document| document_to_py(py, document))
+            .collect()
     }
 
-    pub fn update_many(
+    #[pyo3(signature = (filter=None))]
+    fn find_one(
         &self,
-        py: Python,
-        filter: Py<PyDict>,
-        update: Py<PyDict>,
-    ) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(&filter.into_py_any(py).unwrap())?;
-        let update_doc = convert_py_obj_to_document(&update.into_py_any(py).unwrap())?;
-
-        // Call the Rust method `find_one`
-        match self.inner.update_many(filter_doc, update_doc) {
-            Ok(update_result) => {
-                // Convert BSON Document to Python Dict
-                let py_result = update_result_to_pydict(py, update_result).unwrap();
-                Ok(Some(py_result.into_py_any(py).unwrap()))
-            }
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Update many error: {}",
-                err
-            ))),
-        }
+        py: Python<'_>,
+        filter: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Option<Py<PyDict>>> {
+        let filter = empty_or_document(filter)?;
+        collection_call!(self, find_one(filter))
+            .map_err(database_error)?
+            .map(|document| document_to_py(py, document))
+            .transpose()
     }
 
-    pub fn upsert(
+    #[pyo3(signature = (filter, update, *, upsert=false))]
+    fn update_one(
         &self,
-        py: Python,
-        filter: Py<PyDict>,
-        update: Py<PyDict>,
-    ) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(&filter.into_py_any(py).unwrap())?;
-        let update_doc = convert_py_obj_to_document(&update.into_py_any(py).unwrap())?;
-
-        match self.inner.update_one_with_options(
-            filter_doc,
-            update_doc,
-            UpdateOptions::builder().upsert(true).build(),
-        ) {
-            Ok(update_result) => {
-                // Convert BSON Document to Python Dict
-                let py_result = update_result_to_pydict(py, update_result).unwrap();
-                Ok(Some(py_result.into_py_any(py).unwrap()))
-            }
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Upsert one error: {}",
-                err
-            ))),
-        }
+        py: Python<'_>,
+        filter: &Bound<'_, PyAny>,
+        update: &Bound<'_, PyAny>,
+        upsert: bool,
+    ) -> PyResult<Py<PyDict>> {
+        let filter = py_to_document(filter)?;
+        let update = py_to_document(update)?;
+        let options = UpdateOptions::builder().upsert(upsert).build();
+        let result = collection_call!(self, update_one_with_options(filter, update, options))
+            .map_err(database_error)?;
+        update_result(py, result)
     }
 
-    fn aggregate(&self, pipeline: Py<PyList>) -> PyResult<PyObject> {
-        Python::with_gil(|py| {
-
-            let bson_vec_pipeline: Vec<Document> =
-                convert_py_list_to_vec_document(&pipeline.into_py_any(py).unwrap());
-            match self.inner.aggregate(bson_vec_pipeline).run() {
-                Ok(result) => {
-                    let vec_result = result.collect::<Result<Vec<Document>, _>>().unwrap();
-
-                    let py_result: Vec<Py<PyDict>> = vec_result
-                        .into_iter()
-                        .map(|x| document_to_pydict(py, x).unwrap())
-                        .collect();
-                    Ok(py_result.into_py_any(py).unwrap())
-                }
-                Err(e) => {
-                    // Raise a Python exception on error
-                    Err(PyRuntimeError::new_err(format!("Aggregate error: {}", e)))
-                }
-            }
-        })
-    }
-
-    pub fn upsert_many(
+    #[pyo3(signature = (filter, update, *, upsert=false))]
+    fn update_many(
         &self,
-        py: Python,
-        filter: Py<PyDict>,
-        update: Py<PyDict>,
-    ) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(&filter.into_py_any(py).unwrap())?;
-        let update_doc = convert_py_obj_to_document(&update.into_py_any(py).unwrap())?;
-
-        // Call the Rust method `find_one`
-        match self.inner.update_many_with_options(
-            filter_doc,
-            update_doc,
-            UpdateOptions::builder().upsert(true).build(),
-        ) {
-            Ok(update_result) => {
-                // Convert BSON Document to Python Dict
-                let py_result = update_result_to_pydict(py, update_result).unwrap();
-                Ok(Some(py_result.into_py_any(py).unwrap()))
-            }
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Upsert many error: {}",
-                err
-            ))),
-        }
+        py: Python<'_>,
+        filter: &Bound<'_, PyAny>,
+        update: &Bound<'_, PyAny>,
+        upsert: bool,
+    ) -> PyResult<Py<PyDict>> {
+        let filter = py_to_document(filter)?;
+        let update = py_to_document(update)?;
+        let options = UpdateOptions::builder().upsert(upsert).build();
+        let result = collection_call!(self, update_many_with_options(filter, update, options))
+            .map_err(database_error)?;
+        update_result(py, result)
     }
 
-    pub fn delete_one(&self, filter: Py<PyDict>) -> PyResult<PyObject> {
-        // Acquire the Python GIL (Global Interpreter Lock)
-        // let filter_doc = convert_py_obj_to_document(&filter.into_py_any(py).unwrap())?;
-        Python::with_gil(|py| {
-            let bson_doc: Document = match convert_py_obj_to_document(&filter.into_py_any(py).unwrap())
-            {
-                Ok(d) => d,
-                Err(e) => return Err(PyRuntimeError::new_err(format!("Delete one : {}", e))),
-            };
-            // let bson_doc = convert_py_to_bson(doc);
-            match self.inner.delete_one(bson_doc) {
-                Ok(delete_result) => {
-                    // Create a Python object from the Rust result and return it
-                    let py_result = delete_result_to_pydict(py, delete_result).unwrap();
-                    Ok(py_result.into_py_any(py).unwrap())
-
-                    // Ok(Py::new(py, result)?.to_object(py))
-                }
-                Err(e) => {
-                    // Raise a Python exception on error
-                    Err(PyRuntimeError::new_err(format!("Delete one error: {}", e)))
-                }
-            }
-        })
+    #[pyo3(signature = (filter=None))]
+    fn delete_one(
+        &self,
+        py: Python<'_>,
+        filter: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyDict>> {
+        let filter = empty_or_document(filter)?;
+        let result = collection_call!(self, delete_one(filter)).map_err(database_error)?;
+        delete_result(py, result)
     }
 
-    pub fn delete_many(&self, filter: Py<PyDict>) -> PyResult<PyObject> {
-        // Acquire the Python GIL (Global Interpreter Lock)
-        Python::with_gil(|py| {
-            let bson_doc: Document = match convert_py_obj_to_document(&filter.into_py_any(py).unwrap())
-            {
-                Ok(d) => d,
-                Err(e) => return Err(PyRuntimeError::new_err(format!("Delete many : {}", e))),
-            };
-
-            match self.inner.delete_many(bson_doc) {
-                Ok(delete_result) => {
-                    // Create a Python object from the Rust result and return it
-                    let py_result = delete_result_to_pydict(py, delete_result).unwrap();
-                    Ok(py_result.into_py_any(py).unwrap())
-
-                    // Ok(Py::new(py, result)?.to_object(py))
-                }
-                Err(e) => {
-                    // Raise a Python exception on error
-                    Err(PyRuntimeError::new_err(format!("Delete one error: {}", e)))
-                }
-            }
-        })
+    #[pyo3(signature = (filter=None))]
+    fn delete_many(
+        &self,
+        py: Python<'_>,
+        filter: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyDict>> {
+        let filter = empty_or_document(filter)?;
+        let result = collection_call!(self, delete_many(filter)).map_err(database_error)?;
+        delete_result(py, result)
     }
 
-    pub fn count_documents(&self) -> PyResult<PyObject> {
-        // Acquire the Python GIL (Global Interpreter Lock)
-        Python::with_gil(|py| {
-            match self.inner.count_documents() {
-                Ok(result) => Ok(result.into_pyobject(py).unwrap().into()),
-                Err(e) => {
-                    // Raise a Python exception on error
-                    Err(PyRuntimeError::new_err(format!(
-                        "Count documents error: {}",
-                        e
-                    )))
-                }
-            }
-        })
+    fn count_documents(&self) -> PyResult<u64> {
+        collection_call!(self, count_documents()).map_err(database_error)
     }
 
-    pub fn find_one(&self, py: Python, filter: Py<PyDict>) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(&filter.into_py_any(py).unwrap())?;
-
-        // Call the Rust method `find_one`
-        match self.inner.find_one(filter_doc) {
-            Ok(Some(result_doc)) => {
-                // Convert BSON Document to Python Dict
-                let py_result = document_to_pydict(py, result_doc).unwrap();
-                Ok(Some(py_result.into_py_any(py).unwrap()))
-            }
-            Ok(None) => Ok(None), // Return None if no document is found
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Find one error: {}",
-                err
-            ))),
-        }
+    fn aggregate(&self, py: Python<'_>, pipeline: &Bound<'_, PyAny>) -> PyResult<Vec<Py<PyDict>>> {
+        let pipeline = py_iterable_to_documents(pipeline)?;
+        let documents: Vec<Document> = match &self.inner {
+            CollectionHandle::Database(collection) => collection
+                .aggregate(pipeline)
+                .run()
+                .map_err(database_error)?
+                .collect::<Result<_, _>>()
+                .map_err(database_error)?,
+            CollectionHandle::Transaction(collection) => collection
+                .aggregate(pipeline)
+                .run()
+                .map_err(database_error)?
+                .collect::<Result<_, _>>()
+                .map_err(database_error)?,
+        };
+        documents
+            .into_iter()
+            .map(|document| document_to_py(py, document))
+            .collect()
     }
-    pub fn find(&self, py: Python, filter: Py<PyDict>) -> PyResult<Option<PyObject>> {
-        // Convert PyDict to BSON Document
-        let filter_doc = convert_py_obj_to_document(&filter.into_py_any(py).unwrap())?;
 
-        // Call the Rust method `find_one`
-        match self.inner.find(filter_doc).run() {
-            Ok(result_doc) => {
-                // Convert BSON Document to Python Dict
-                let py_result: Vec<Py<PyDict>> = result_doc
-                    .map(|x| document_to_pydict(py, x.unwrap()).unwrap())
-                    .collect();
-                // let py_result = document_to_pydict(py, result_doc).unwrap();
-                Ok(Some(py_result.into_py_any(py).unwrap()))
-            }
-            // Ok(None) => Ok(None), // Return None if no document is found
-            Err(err) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Find one error: {}",
-                err
-            ))),
-        }
+    #[pyo3(signature = (keys, *, name=None, unique=false))]
+    fn create_index(
+        &self,
+        keys: &Bound<'_, PyAny>,
+        name: Option<String>,
+        unique: bool,
+    ) -> PyResult<String> {
+        let keys = py_to_document(keys)?;
+        let generated_name = name.clone().unwrap_or_else(|| {
+            keys.iter()
+                .map(|(key, value)| {
+                    let direction = match value {
+                        Bson::Int32(value) => value.to_string(),
+                        Bson::Int64(value) => value.to_string(),
+                        Bson::Double(value) => value.to_string(),
+                        value => value.to_string(),
+                    };
+                    format!("{key}_{direction}")
+                })
+                .collect::<Vec<_>>()
+                .join("_")
+        });
+        let model = IndexModel {
+            keys,
+            options: Some(IndexOptions {
+                name: Some(generated_name.clone()),
+                unique: Some(unique),
+            }),
+        };
+        collection_call!(self, create_index(model)).map_err(database_error)?;
+        Ok(generated_name)
     }
-}
-impl From<Collection<Document>> for PyCollection {
-    fn from(collection: Collection<Document>) -> PyCollection {
-        PyCollection {
-            inner: Arc::new(collection),
-        }
+
+    fn drop_index(&self, name: &str) -> PyResult<()> {
+        collection_call!(self, drop_index(name)).map_err(database_error)
+    }
+
+    fn drop(&self) -> PyResult<()> {
+        collection_call!(self, drop()).map_err(database_error)
     }
 }
 
-#[pyclass]
+#[pyclass(name = "_Transaction")]
+pub struct PyTransaction {
+    inner: Transaction,
+    active: AtomicBool,
+}
+
+#[pymethods]
+impl PyTransaction {
+    fn collection(&self, name: &str) -> PyResult<PyCollection> {
+        if !self.active.load(Ordering::Acquire) {
+            return Err(PyRuntimeError::new_err("transaction is no longer active"));
+        }
+        Ok(PyCollection::from_transaction(&self.inner, name))
+    }
+
+    fn commit(&self) -> PyResult<()> {
+        if !self.active.swap(false, Ordering::AcqRel) {
+            return Err(PyRuntimeError::new_err("transaction is no longer active"));
+        }
+        self.inner.commit().map_err(database_error)
+    }
+
+    fn rollback(&self) -> PyResult<()> {
+        if !self.active.swap(false, Ordering::AcqRel) {
+            return Err(PyRuntimeError::new_err("transaction is no longer active"));
+        }
+        self.inner.rollback().map_err(database_error)
+    }
+
+    #[getter]
+    fn active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
+    }
+}
+
+#[pyclass(name = "_Database")]
 pub struct PyDatabase {
-    inner: Arc<Mutex<Database>>,
+    inner: Database,
 }
 
 #[pymethods]
 impl PyDatabase {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
-        let db_path = Path::new(path);
-        match Database::open_path(db_path) {
-            Ok(db) => Ok(PyDatabase {
-                inner: Arc::new(Mutex::new(db)),
-            }),
-            Err(e) => Err(PyOSError::new_err(e.to_string())),
-        }
+        Self::open_path(path)
     }
 
     #[staticmethod]
-    fn open_path(path: &str) -> PyResult<PyDatabase> {
-        let db_path = Path::new(path);
-        Database::open_path(db_path)
-            .map(|db| PyDatabase {
-                inner: Arc::new(Mutex::new(db)),
+    fn open_path(path: &str) -> PyResult<Self> {
+        Database::open_path(path)
+            .map(|inner| Self { inner })
+            .map_err(|error| PyOSError::new_err(error.to_string()))
+    }
+
+    fn create_collection(&self, name: &str) -> PyResult<()> {
+        self.inner.create_collection(name).map_err(database_error)
+    }
+
+    fn collection(&self, name: &str) -> PyCollection {
+        PyCollection::from_database(&self.inner, name)
+    }
+
+    fn drop_collection(&self, name: &str) -> PyResult<()> {
+        self.inner
+            .collection::<Document>(name)
+            .drop()
+            .map_err(database_error)
+    }
+
+    fn list_collection_names(&self) -> PyResult<Vec<String>> {
+        self.inner.list_collection_names().map_err(database_error)
+    }
+
+    fn start_transaction(&self) -> PyResult<PyTransaction> {
+        self.inner
+            .start_transaction()
+            .map(|inner| PyTransaction {
+                inner,
+                active: AtomicBool::new(true),
             })
-            .map_err(|e| PyOSError::new_err(e.to_string()))
+            .map_err(database_error)
     }
 
-    pub fn create_collection(&self, name: &str) -> PyResult<()> {
-        let _ = self.inner.lock().unwrap().create_collection(name);
-        Ok(())
+    fn metrics(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let metrics = self.inner.metrics();
+        let result = PyDict::new(py);
+        result.set_item("find_by_index_count", metrics.find_by_index_count())?;
+        Ok(result.unbind())
     }
 
-    fn collection(&self, name: &str) -> PyResult<PyCollection> {
-        // Attempt to acquire the lock and fetch/create the collection
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock: {}", e)))?;
-        let rust_collection = guard.collection::<Document>(name); // Assume this returns a Rust Collection
-
-        //Convert a Rust Collection to a PyCollection
-        let py_collection: PyCollection = PyCollection::from(rust_collection);
-        Ok(py_collection)
+    fn enable_metrics(&self) {
+        self.inner.metrics().enable();
     }
 
-    pub fn list_collection_names(&self) -> PyResult<Vec<String>> {
-        let collections_names = self.inner.lock().unwrap().list_collection_names();
-        match collections_names {
-            Ok(collection_names) => Ok(collection_names),
-            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Error listing collection names: {}",
-                e
-            ))),
-        }
+    #[staticmethod]
+    fn set_log(enabled: bool) {
+        Database::set_log(enabled);
     }
-
-    // You can add methods here to interact with the Database
 }

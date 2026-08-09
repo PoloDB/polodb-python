@@ -1,207 +1,188 @@
-use polodb_core::bson::{Bson, Document};
-use polodb_core::results;
+use polodb_core::bson::{Binary, Bson, DateTime, Document, Regex, spec::BinarySubtype};
+use pyo3::exceptions::{PyOverflowError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
-use pyo3::types::{PyAny, PyBool, PyBytes, PyFloat, PyList, PyString};
+use pyo3::types::{PyAny, PyBool, PyByteArray, PyBytes, PyDict, PyList, PyTuple};
 
-pub fn convert_py_list_to_vec_document<'a>(py_list_obj: &'a Py<PyAny>) -> Vec<Document> {
-    Python::with_gil(|py| {
-        // Try to downcast the PyAny to a PyList
-        if let Ok(py_list) = py_list_obj.downcast_bound::<PyList>(py) {
-            // If downcast is successful, return an iterator over the list's items
-            let iter = py_list.iter().map(|item| {
-                // let py_obj: Py<PyAny> = item.to_object(item.py());
-                let py_obj2 = item.into_pyobject(py).unwrap();
-                // Convert each item (expected to be a dictionary) into a BSON document
+use crate::PyObjectId;
 
-                convert_py_obj_to_document(py_obj2.as_unbound()).unwrap()
-            });
-            Vec::from_iter(iter)
-        } else {
-            Vec::from_iter(std::iter::empty())
-        }
-    })
-}
-
-pub fn convert_py_obj_to_document(py_obj: &Py<PyAny>) -> PyResult<Document> {
-    Python::with_gil(|py| {
-        // Try to extract as a String and convert to BSON
-        //    let mut doc: Document = Document::new();
-        if let Ok(dict) = py_obj.downcast_bound::<PyDict>(py) {
-            // let dict_ref = dict.borrow(); // Convert Py<PyDict> to &PyDict
-            let mut doc = Document::new();
-            for (key, value) in dict.iter() {
-                // Use `iter()` on the `PyDict`
-                let key: String = key.extract()?; // Extract the key as a string
-                let bson_value =
-                    convert_py_obj_to_bson(value.into_pyobject(py).unwrap().as_unbound())?; // Convert value to BSON
-                doc.insert(key, bson_value);
-            }
-            Ok(doc)
-        }
-        // If the type is not supported, return an error
-        else {
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "Unsupported Python type for BSON conversion",
-            ))
-        }
-    })
-}
-
-pub fn convert_py_obj_to_bson(py_obj: &Py<PyAny>) -> PyResult<Bson> {
-    Python::with_gil(|py| {
-        // Try to extract as a String and convert to BSON
-        if let Ok(rust_string) = py_obj.extract::<String>(py) {
-            Ok(Bson::String(rust_string))
-        }
-        // Try to extract as a bool and convert to BSON
-        else if let Ok(rust_bool) = py_obj.extract::<bool>(py) {
-            Ok(Bson::Boolean(rust_bool))
-        }
-        // Try to extract as an int (i64) and convert to BSON
-        else if let Ok(rust_int) = py_obj.extract::<i64>(py) {
-            Ok(Bson::Int64(rust_int))
-        }
-        // Try to extract as a float and convert to BSON double
-        else if let Ok(rust_float) = py_obj.extract::<f64>(py) {
-            Ok(Bson::Double(rust_float))
-        }
-        // Try to extract as a dictionary and convert to BSON document
-        else if let Ok(dict) = py_obj.downcast_bound::<PyDict>(py) {
-            let mut bson_doc = Document::new();
-            for (key, value) in dict.iter() {
-                let key_str: String = key.extract::<String>()?;
-
-                let bson_value =
-                    convert_py_obj_to_bson(value.into_pyobject(py).unwrap().as_unbound())?;
-                bson_doc.insert(key_str, bson_value);
-            }
-            Ok(Bson::Document(bson_doc))
-        }
-        // Try to extract as a list and convert to BSON array
-        else if let Ok(list) = py_obj.downcast_bound::<PyList>(py) {
-            let mut bson_array = Vec::new();
-            for item in list.iter() {
-                let bson_item =
-                    convert_py_obj_to_bson(item.into_pyobject(py).unwrap().as_unbound())?;
-                bson_array.push(bson_item);
-            }
-            Ok(Bson::Array(bson_array))
-        }
-        // If the type is not supported, return an error
-        else {
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "Unsupported Python type for BSON conversion",
-            ))
-        }
-    })
-}
-
-pub fn delete_result_to_pydict(
-    py: Python,
-    delete_result: results::DeleteResult,
-) -> PyResult<Py<PyDict>> {
-    let py_dict = PyDict::new(py);
-
-    // Insert matched_count and modified_count into the PyDict
-    py_dict.set_item("deleted_count", delete_result.deleted_count as i64)?;
-
-    Ok(py_dict.into())
-}
-
-pub fn update_result_to_pydict(
-    py: Python,
-    update_result: results::UpdateResult,
-) -> PyResult<Py<PyDict>> {
-    let py_dict = PyDict::new(py);
-
-    // Insert matched_count and modified_count into the PyDict
-    py_dict.set_item("matched_count", update_result.matched_count as i64)?;
-    py_dict.set_item("modified_count", update_result.modified_count as i64)?;
-
-    Ok(py_dict.into())
-}
-pub fn document_to_pydict(py: Python, doc: Document) -> PyResult<Py<PyDict>> {
-    let py_dict = PyDict::new(py);
-    for (key, value) in doc {
-        let py_value = bson_to_py_obj(py, &value);
-        py_dict.set_item(key, py_value)?;
+pub fn py_to_document(value: &Bound<'_, PyAny>) -> PyResult<Document> {
+    let dict = value
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("expected a mapping with string keys"))?;
+    let mut document = Document::new();
+    for (key, value) in dict.iter() {
+        document.insert(key.extract::<String>()?, py_to_bson(&value)?);
     }
-    Ok(py_dict.into())
+    Ok(document)
 }
 
-pub fn bson_to_py_obj(py: Python, bson: &Bson) -> PyObject {
-    match bson {
-        Bson::Null => py.None(),
-        Bson::Int32(i) => i.into_pyobject(py).unwrap().into(),
-        Bson::Int64(i) => i.into_pyobject(py).unwrap().into(),
-        Bson::Double(f) => PyFloat::new(py, *f).into_pyobject(py).unwrap().into(),
-        Bson::String(s) => PyString::new(py, s).into_pyobject(py).unwrap().into(),
-        // Bson::Boolean(b) => {
-        //     // PyBool::new(py, *b) -> &PyBool (borrowed), convert it with Py::from
-        //     // Create a &PyBool
-        //     let py_bool_ref = PyBool::new(py, *b).as_unbound().clone_ref(py);
-        //     // Coerce &PyBool to &PyAny by assignment
-        //     let py_any: &PyAny = py_bool_ref ;
-        //     py_bool_ref
-        // }
-        Bson::Boolean(b) => PyBool::new(py, *b).as_unbound().clone_ref(py).into_any(),
-        Bson::Array(arr) => {
-            // Create an empty PyList without specifying a slice
-            let py_list = PyList::empty(py); // Use empty method instead of new
-            for item in arr {
-                py_list.append(bson_to_py_obj(py, item)).unwrap();
+pub fn py_iterable_to_documents(value: &Bound<'_, PyAny>) -> PyResult<Vec<Document>> {
+    value
+        .try_iter()?
+        .map(|item| py_to_document(&item?))
+        .collect()
+}
+
+pub fn py_to_bson(value: &Bound<'_, PyAny>) -> PyResult<Bson> {
+    if value.is_none() {
+        return Ok(Bson::Null);
+    }
+    if value.is_instance_of::<PyBool>() {
+        return Ok(Bson::Boolean(value.extract()?));
+    }
+    if let Ok(object_id) = value.extract::<PyRef<'_, PyObjectId>>() {
+        return Ok(Bson::ObjectId(object_id.inner));
+    }
+    if let Ok(integer) = value.extract::<i64>() {
+        return Ok(Bson::Int64(integer));
+    }
+    if value.is_instance(&value.py().import("decimal")?.getattr("Decimal")?)? {
+        return Err(PyTypeError::new_err(
+            "decimal.Decimal is not supported because PoloDB does not preserve Decimal128 values",
+        ));
+    }
+    if let Ok(float) = value.extract::<f64>() {
+        return Ok(Bson::Double(float));
+    }
+    if let Ok(string) = value.extract::<String>() {
+        return Ok(Bson::String(string));
+    }
+    if let Ok(bytes) = value.cast::<PyBytes>() {
+        return Ok(Bson::Binary(Binary {
+            subtype: BinarySubtype::Generic,
+            bytes: bytes.as_bytes().to_vec(),
+        }));
+    }
+    if let Ok(bytes) = value.cast::<PyByteArray>() {
+        // SAFETY: the bytearray is only read while the GIL is held.
+        let bytes = unsafe { bytes.as_bytes() }.to_vec();
+        return Ok(Bson::Binary(Binary {
+            subtype: BinarySubtype::Generic,
+            bytes,
+        }));
+    }
+    if value.is_instance(&value.py().import("datetime")?.getattr("datetime")?)? {
+        let seconds: f64 = value.call_method0("timestamp")?.extract()?;
+        let millis = seconds * 1000.0;
+        if !millis.is_finite() || millis < i64::MIN as f64 || millis > i64::MAX as f64 {
+            return Err(PyOverflowError::new_err("datetime is outside BSON's range"));
+        }
+        return Ok(Bson::DateTime(DateTime::from_millis(millis.round() as i64)));
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        return py_to_document(dict.as_any()).map(Bson::Document);
+    }
+    if let Ok(list) = value.cast::<PyList>() {
+        return list
+            .iter()
+            .map(|item| py_to_bson(&item))
+            .collect::<PyResult<Vec<_>>>()
+            .map(Bson::Array);
+    }
+    if let Ok(tuple) = value.cast::<PyTuple>() {
+        return tuple
+            .iter()
+            .map(|item| py_to_bson(&item))
+            .collect::<PyResult<Vec<_>>>()
+            .map(Bson::Array);
+    }
+    if value.hasattr("pattern")? && value.hasattr("flags")? {
+        let pattern: String = value.getattr("pattern")?.extract()?;
+        let flags: u32 = value.getattr("flags")?.extract()?;
+        let re = value.py().import("re")?;
+        let mut options = String::new();
+        for (name, option) in [
+            ("IGNORECASE", 'i'),
+            ("MULTILINE", 'm'),
+            ("DOTALL", 's'),
+            ("VERBOSE", 'x'),
+        ] {
+            let flag: u32 = re.getattr(name)?.extract()?;
+            if flags & flag != 0 {
+                options.push(option);
             }
-            py_list.into_pyobject(py).unwrap().into()
         }
-        Bson::Document(doc) => {
-            let py_dict = PyDict::new(py);
-            for (key, value) in doc.iter() {
-                py_dict.set_item(key, bson_to_py_obj(py, value)).unwrap();
+        return Ok(Bson::RegularExpression(Regex { pattern, options }));
+    }
+
+    Err(PyTypeError::new_err(format!(
+        "unsupported value of type '{}' for BSON conversion",
+        value.get_type().name()?
+    )))
+}
+
+pub fn document_to_py(py: Python<'_>, document: Document) -> PyResult<Py<PyDict>> {
+    let result = PyDict::new(py);
+    for (key, value) in document {
+        result.set_item(key, bson_to_py(py, &value)?)?;
+    }
+    Ok(result.unbind())
+}
+
+pub fn bson_to_py(py: Python<'_>, value: &Bson) -> PyResult<Py<PyAny>> {
+    match value {
+        Bson::Double(value) => Ok(value.into_pyobject(py)?.into_any().unbind()),
+        Bson::String(value) => Ok(value.into_pyobject(py)?.into_any().unbind()),
+        Bson::Array(values) => {
+            let items = values
+                .iter()
+                .map(|value| bson_to_py(py, value))
+                .collect::<PyResult<Vec<_>>>()?;
+            Ok(PyList::new(py, items)?.into_any().unbind())
+        }
+        Bson::Document(value) => Ok(document_to_py(py, value.clone())?.into_any()),
+        Bson::Boolean(value) => Ok(value.into_pyobject(py)?.to_owned().into_any().unbind()),
+        Bson::Null | Bson::Undefined => Ok(py.None()),
+        Bson::Int32(value) => Ok(value.into_pyobject(py)?.into_any().unbind()),
+        Bson::Int64(value) => Ok(value.into_pyobject(py)?.into_any().unbind()),
+        Bson::ObjectId(value) => Ok(Py::new(py, PyObjectId { inner: *value })?.into_any()),
+        Bson::DateTime(value) => {
+            let datetime = py.import("datetime")?;
+            let timezone = datetime.getattr("timezone")?.getattr("utc")?;
+            let seconds = value.timestamp_millis() as f64 / 1000.0;
+            Ok(datetime
+                .getattr("datetime")?
+                .call_method1("fromtimestamp", (seconds, timezone))?
+                .unbind())
+        }
+        Bson::RegularExpression(value) => {
+            let re = py.import("re")?;
+            let mut flags = 0_u32;
+            for option in value.options.chars() {
+                let name = match option {
+                    'i' => Some("IGNORECASE"),
+                    'm' => Some("MULTILINE"),
+                    's' => Some("DOTALL"),
+                    'x' => Some("VERBOSE"),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    flags |= re.getattr(name)?.extract::<u32>()?;
+                }
             }
-            py_dict.into_pyobject(py).unwrap().into()
+            Ok(re
+                .call_method1("compile", (&value.pattern, flags))?
+                .unbind())
         }
-        Bson::RegularExpression(regex) => {
-            let re_module = py.import("re").unwrap();
-            re_module
-                .call_method1("compile", (regex.pattern.as_str(),))
-                .unwrap()
-                .into_pyobject(py)
-                .unwrap()
-                .into()
+        Bson::Binary(value) => Ok(PyBytes::new(py, &value.bytes).into_any().unbind()),
+        Bson::Timestamp(value) => Ok((value.time, value.increment)
+            .into_pyobject(py)?
+            .into_any()
+            .unbind()),
+        Bson::Decimal128(value) => Ok(py
+            .import("decimal")?
+            .getattr("Decimal")?
+            .call1((value.to_string(),))?
+            .unbind()),
+        Bson::JavaScriptCode(value) | Bson::Symbol(value) => {
+            Ok(value.into_pyobject(py)?.into_any().unbind())
         }
-        // Handle JavaScript code
-        Bson::JavaScriptCode(code) => PyString::new(py, code).into_pyobject(py).unwrap().into(),
-        Bson::Timestamp(ts) => (ts.time, ts.increment).into_pyobject(py).unwrap().into(),
-        Bson::Binary(bin) => PyBytes::new(py, &bin.bytes)
-            .into_pyobject(py)
-            .unwrap()
-            .into(),
-        Bson::ObjectId(oid) => PyString::new(py, &oid.to_hex())
-            .into_pyobject(py)
-            .unwrap()
-            .into(),
-        Bson::DateTime(dt) => {
-            let timestamp = dt.timestamp_millis() / 1000;
-            let datetime = py.import("datetime").unwrap().getattr("datetime").unwrap();
-            datetime
-                .call1((timestamp,))
-                .unwrap()
-                .into_pyobject(py)
-                .unwrap()
-                .into()
+        Bson::JavaScriptCodeWithScope(value) => {
+            let result = PyDict::new(py);
+            result.set_item("code", &value.code)?;
+            result.set_item("scope", document_to_py(py, value.scope.clone())?)?;
+            Ok(result.into_any().unbind())
         }
-        Bson::Symbol(s) => PyString::new(py, s).into_pyobject(py).unwrap().into(),
-
-        // Handle undefined value (deprecated)
-        Bson::Undefined => py.None(),
-
-        // Handle MaxKey (convert to None)
-        Bson::MaxKey => py.None(),
-
-        // Handle MinKey (convert to None)
-        Bson::MinKey => py.None(),
-
-        _ => py.None(), // Handle other BSON types as needed
+        Bson::MinKey | Bson::MaxKey | Bson::DbPointer(_) => Ok(py.None()),
     }
 }

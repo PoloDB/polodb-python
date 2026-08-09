@@ -1,36 +1,30 @@
 [package]
-name = "polodb_python"       # Must match the Python package name
-version = "0.1.18"
-edition = "2021"
+name = "polodb-python"
+version = "0.2.0"
+edition = "2024"
 description = "Python bindings for PoloDB"
-license = "Apache License"
+license = "Apache-2.0"
 
 repository = "https://github.com/PoloDB/polodb-python"
 homepage = "https://github.com/PoloDB/polodb-python"
 documentation = "https://github.com/PoloDB/polodb-python/blob/main/README.md"
-exclude = ["LICENSE.txt"]
+exclude = [".venv/", "data/", "dist/", "inspect.sh", "target/"]
 
 [lib]
-# The name of the native library. This is the name which will be used in Python to import the
-# library (i.e. `import string_sum`). If you change this, you must also change the name of the
-# `#[pymodule]` in `src/lib.rs`.
-name = "rust_polodb"
-
-# "cdylib" is necessary to produce a shared library for Python to import from.
-crate-type = ["cdylib", "rlib"]
+name = "_rust"
+crate-type = ["cdylib"]
 
 [dependencies]
-
-polodb_core = "5.1.3"
-# polodb_core = { path = "../src/polodb_core", default-features = false  }
-pyo3 = { version = "0.23.2", features = ["extension-module", "auto-initialize"] }
+polodb_core = "5.3.0"
+pyo3 = { version = "0.29.2", features = ["abi3-py39", "extension-module"] }
 
 [profile.release]
 lto = "thin"
-debug = "line-tables-only"
+strip = "symbols"
 
 [profile.dist-release]
 inherits = "release"
 codegen-units = 1
 debug = false
 lto = "fat"
+strip = "symbols"

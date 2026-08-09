@@ -1,46 +1,72 @@
 [project]
 name = "polodb-python"
-version = "0.1.18"
-description = "Add your description here"
+version = "0.2.0"
+description = "Modern Python bindings for the embedded PoloDB document database"
 readme = "README.md"
 requires-python = ">=3.9"
+license = "Apache-2.0"
 authors = [
     { name = "SENHAJI RHAZI Hamza", email = "hamza.senhajirhazi@gmail.com" },
 ]
+keywords = ["database", "embedded", "document", "mongodb", "polodb"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Rust",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Typing :: Typed",
 ]
-dependencies = [
-    "importlib-metadata>=8.7.0",
-    "tomli>=2.2.1",
-]
+dependencies = []
+
+[project.urls]
+Homepage = "https://www.polodb.org"
+Documentation = "https://github.com/PoloDB/polodb-python#readme"
+Repository = "https://github.com/PoloDB/polodb-python"
+Issues = "https://github.com/PoloDB/polodb-python/issues"
 
 [build-system]
-requires = ["maturin==1.8.7"]
+requires = ["maturin>=1.14,<2"]
 build-backend = "maturin"
 
 [dependency-groups]
 dev = [
-    "cibuildwheel>=2.21.3",
-    "ipdb>=0.13.13",
-    "ipython>=8.18.1",
-    "maturin>=1.9.0",
-    "pip>=25.1.1",
-    "pytest>=8.3.3",
-    "wheel>=0.44.0",
+    "maturin>=1.14,<2",
+    "mypy>=1.17,<2",
+    "pytest>=8.4",
+    "ruff>=0.12",
 ]
 
 [tool.uv]
 default-groups = ["dev"]
 
-[tool.uv.sources]
-polodb = { workspace = true }
-
 [tool.pytest.ini_options]
-pythonpath = ["."]
+addopts = "-ra"
+testpaths = ["tests"]
 
 [tool.maturin]
-include = ["polodb/**/*", "LICENSE.txt"]
+module-name = "polodb._rust"
+python-source = "."
+features = ["pyo3/extension-module"]
+include = ["polodb/py.typed", "LICENSE.txt"]
 
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+files = ["polodb"]

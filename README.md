@@ -1,41 +1,178 @@
-# Py-PoloDB Python Bindings
+# PoloDB for Python
 
-## Overview
-This repository contains the Python bindings for the [PoloDB](https://www.polodb.org) project. These bindings allow Python code to interface seamlessly with the PoloDB core functionalities written in Rust.
+Fast, typed Python bindings for [PoloDB](https://www.polodb.org), an embedded document database with a MongoDB-like API. The database runs in-process and stores its data locally—there is no server to install or manage.
 
-## Installation 
+Version 0.2 uses PoloDB Core 5.3, PyO3 0.29, and CPython's stable ABI. Published wheels support CPython 3.9 and newer on Linux, macOS, and Windows.
+
+## Installation
+
 ```bash
-python3.9 -m pip install polodb-python
+python -m pip install polodb-python
 ```
 
-## Usage : 
+## Quick start
+
 ```python
->>> from polodb import PoloDB 
->>> db  = PoloDB("db")
->>> db
-<polodb.core.PoloDB object at 0x1001d6a00>
->>> col = db.collection('my-collection')
->>> col
-<polodb.core.Collection object at 0x100244d00>
->>> data = [{"foo":"bar", "titi":"kpkp"}, {"lol":"out", "foo":"bar"}]
->>> col.insert_many(data)
-{0: '6725102e0c6d6f91b9df53bd', 1: '6725102e0c6d6f91b9df53be'}
->>> col.len()
-2
->>> col.find({"lol":"out"})
-[{'lol': 'out', 'foo': 'bar', '_id': '6725102e0c6d6f91b9df53be'}]
+from polodb import PoloDB
+
+with PoloDB("app.db") as db:
+    books = db["books"]
+    inserted = books.insert_one(
+        {"title": "The Three-Body Problem", "author": "Liu Cixin", "year": 2008}
+    )
+
+    book = books.find_one({"_id": inserted.inserted_id})
+    print(book)
+
+    recent = books.find(
+        {"year": {"$gte": 2000}},
+        sort={"year": -1},
+        limit=10,
+    )
 ```
 
-### Current methods supported for collection
+Collections can also be accessed as attributes (`db.books`), though item access is preferable when a name is dynamic or collides with a database attribute.
 
-- [x] delete_one
-- [x] delete_many
-- [x] find
-- [x] find_one
-- [x] insert_many
-- [x] insert_one
-- [x] len
-- [x] name
-- [x] update_many (with upsert option)
-- [x] update_one (with upsert option)
-- [x] aggregate
+## Collection API
+
+### Insert and query
+
+```python
+result = books.insert_many(
+    [
+        {"title": "1984", "author": "George Orwell", "year": 1949},
+        {"title": "Animal Farm", "author": "George Orwell", "year": 1945},
+    ]
+)
+print(result.inserted_ids)
+
+book = books.find_one({"title": "1984"})
+all_orwell = books.find({"author": "George Orwell"}, sort={"year": 1})
+for book in books.find_iter({"year": {"$lt": 1950}}):
+    print(book)
+```
+
+`find()` accepts `skip`, `limit`, and `sort` keyword arguments. An omitted filter means an empty filter.
+
+### Update and delete
+
+```python
+updated = books.update_one(
+    {"title": "1984"},
+    {"$set": {"in_print": True}},
+)
+print(updated.matched_count, updated.modified_count)
+
+books.update_many(
+    {"author": "Octavia E. Butler"},
+    {"$set": {"featured": True}},
+    upsert=False,
+)
+
+deleted = books.delete_many({"in_print": False})
+print(deleted.deleted_count)
+```
+
+### Aggregation
+
+```python
+authors = books.aggregate(
+    [
+        {"$match": {"year": {"$gte": 2000}}},
+        {"$sort": {"year": -1}},
+        {"$limit": 10},
+    ]
+)
+```
+
+### Indexes
+
+```python
+index_name = books.create_index({"title": 1}, unique=True)
+books.drop_index(index_name)
+```
+
+### Counts and drops
+
+```python
+print(len(books))
+print(books.count_documents())
+books.drop()
+
+# Equivalent database-level operation:
+db.drop_collection("books")
+```
+
+## Transactions
+
+Transactions commit when their context exits normally and roll back when an exception escapes:
+
+```python
+with db.transaction() as transaction:
+    accounts = transaction["accounts"]
+    accounts.update_one({"name": "Ada"}, {"$inc": {"balance": -100}})
+    accounts.update_one({"name": "Grace"}, {"$inc": {"balance": 100}})
+```
+
+Manual `commit()` and `rollback()` are also available.
+
+## BSON values
+
+The binding round-trips the common BSON-compatible Python values:
+
+- `None`, `bool`, `int`, `float`, `str`
+- nested dictionaries, lists, and tuples
+- `bytes` and `bytearray`
+- timezone-aware or naive `datetime.datetime` values (stored with millisecond precision and returned in UTC)
+- compiled regular expressions
+- `polodb.ObjectId`
+
+Generated `_id` values are returned as `ObjectId` instances, so they can be passed directly into later filters:
+
+```python
+from polodb import ObjectId
+
+identifier = ObjectId()  # new value
+same_identifier = ObjectId(identifier.hex)
+assert identifier == same_identifier
+```
+
+## Results and errors
+
+Write operations return typed, immutable result objects:
+
+- `InsertOneResult.inserted_id`
+- `InsertManyResult.inserted_ids`
+- `UpdateResult.matched_count` and `.modified_count`
+- `DeleteResult.deleted_count`
+
+They also implement `Mapping`, preserving dictionary-style reads such as `result["modified_count"]`. Database-operation failures raise `PoloDBError`; invalid Python values raise standard `TypeError` or `ValueError` exceptions.
+
+## Migrating from 0.1
+
+Most CRUD code continues to work. Notable improvements and changes in 0.2 are:
+
+- generated IDs are `ObjectId` values instead of lossy strings; use `str(id)` or `id.hex` when text is required;
+- write results are typed mapping objects rather than plain dictionaries;
+- `find()` always returns a list rather than `Optional[list]`;
+- `len(collection)` and `count_documents()` are preferred; `collection.len()` remains as a compatibility alias;
+- context managers now close databases and correctly commit or roll back transactions;
+- unsupported BSON values raise an exception instead of silently becoming `None` or panicking the interpreter.
+
+## Development
+
+```bash
+uv sync
+uv run maturin develop
+uv run pytest
+uv run ruff check .
+uv run mypy polodb
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+Releases are built from `vX.Y.Z` tags. The tag must match both `pyproject.toml` and `Cargo.toml`. PyPI publication uses a Trusted Publisher configured for the `pypi` GitHub environment.
+
+## License
+
+Apache-2.0. See [LICENSE.txt](LICENSE.txt).
