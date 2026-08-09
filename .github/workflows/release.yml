@@ -71,6 +71,9 @@ jobs:
             target: x64
     steps:
       - uses: actions/checkout@v6
+      - name: Set macOS Intel deployment target
+        if: matrix.os == 'macos-15-intel'
+        run: echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> "$GITHUB_ENV"
       - uses: PyO3/maturin-action@v1
         with:
           command: build
