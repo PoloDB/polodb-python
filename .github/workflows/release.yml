@@ -62,7 +62,7 @@ jobs:
           - os: ubuntu-latest
             target: aarch64
             manylinux: "2_28"
-            before_script_linux: dnf install -y clang-devel
+            before_script_linux: apt-get update && apt-get install -y libclang-dev
           - os: macos-15-intel
             target: x86_64
           - os: macos-latest
