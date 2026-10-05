@@ -1,6 +1,6 @@
 # PoloDB for Python
 
-Fast, typed Python bindings for [PoloDB](https://www.polodb.org), an embedded document database with a MongoDB-like API. The database runs in-process and stores its data locally—there is no server to install or manage.
+Fast, typed Python bindings for [PoloDB](https://github.com/PoloDB/PoloDB), an embedded document database with a MongoDB-like API. The database runs in-process and stores its data locally—there is no server component to maintain.
 
 Version 0.2 uses PoloDB Core 5.3, PyO3 0.29, and CPython's stable ABI. Published wheels support CPython 3.10 and newer on Linux, macOS, and Windows.
 
@@ -77,7 +77,7 @@ for book in books.find_iter({"year": {"$lt": 1950}}):
     print(book)
 ```
 
-`find()` returns a lazy cursor, so documents are decoded as they are consumed rather than loaded into memory at once. Cursors support chainable `skip()`, `limit()`, and `sort()` methods; the equivalent keyword arguments on `find()` remain available. An omitted filter means an empty filter.
+`find()` returns a lazy cursor, so documents are decoded as they are consumed rather than loaded into memory at once. Cursors support chainable `skip()`, `limit()`, and `sort()` methods; the equivalent keyword arguments can be passed to `find()` as a convenience.
 
 ### Update and delete
 
@@ -171,7 +171,7 @@ Write operations return typed, immutable result objects:
 - `UpdateResult.matched_count` and `.modified_count`
 - `DeleteResult.deleted_count`
 
-They also implement `Mapping`, preserving dictionary-style reads such as `result["modified_count"]`. Database-operation failures raise `PoloDBError`; invalid Python values raise standard `TypeError` or `ValueError` exceptions.
+They also implement `Mapping`, preserving dictionary-style reads such as `result["modified_count"]`. Database-operation failures raise `PoloDBError`; invalid Python values raise standard `TypeError`.
 
 ## Migrating from 0.1
 
